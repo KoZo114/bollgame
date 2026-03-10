@@ -26,7 +26,6 @@
             color: #fff;
             font-family: 'Helvetica Neue', Arial, sans-serif;
             pointer-events: none;
-            /* UIの裏でもタッチできるようにする */
         }
 
         h2 {
@@ -39,13 +38,21 @@
             font-size: 14px;
             color: #ccc;
         }
+
+        #stageInfo {
+            font-size: 20px;
+            color: #00FFDD;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
     </style>
 </head>
 
 <body>
     <div id="ui">
+        <div id="stageInfo">STAGE 1</div>
         <h2>Score: <span id="scoreText">0</span></h2>
-        <p>画面をなぞって線をひき、ボールを跳ね返そう！</p>
+        <p>線を引いてボールを跳ね返そう！(0.2秒待機あり)</p>
     </div>
     <canvas id="gameCanvas"></canvas>
 
@@ -53,8 +60,8 @@
         const canvas = document.getElementById("gameCanvas");
         const ctx = canvas.getContext("2d");
         const scoreText = document.getElementById("scoreText");
+        const stageInfo = document.getElementById("stageInfo");
 
-        // 画面サイズ調整
         function resize() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
@@ -64,110 +71,141 @@
 
         let isGameOver = false;
         let score = 0;
+        let currentStage = 1;
+        const maxStage = 3;
 
-        // ボールの設定
-        const ball = {
-            x: window.innerWidth / 2,
-            y: window.innerHeight / 2, // 画面中央からスタート
-            radius: 8,
-            dx: (Math.random() > 0.5 ? 1 : -1) * 3, // 少しゆっくりスタート
-            dy: -4,
-            baseSpeed: 7, // 跳ね返したときの基本スピード
-            color: "#FF3366" // ネオンピンク
-        };
+        // ボール（初期値は仮。ステージ開始時に上書き）
+        const ball = { x: 0, y: 0, radius: 8, dx: 0, dy: 0, baseSpeed: 7, color: "#FF3366" };
 
-        // ブロックの設定
-        const brickRowCount = 6;
-        const brickColumnCount = Math.floor(canvas.width / 60);
+        let bricks = [];
+        let brickColumnCount = 0;
+        let brickRowCount = 0;
         const brickPadding = 8;
-        const brickOffsetTop = 100;
-        const brickOffsetLeft = (canvas.width - (brickColumnCount * 60)) / 2;
-        const brickWidth = 60 - brickPadding;
+        const brickOffsetTop = 120;
+        const brickWidth = 52;
         const brickHeight = 20;
 
-        const bricks = [];
-        for (let c = 0; c < brickColumnCount; c++) {
-            bricks[c] = [];
-            for (let r = 0; r < brickRowCount; r++) {
-                bricks[c][r] = { x: 0, y: 0, status: 1 };
+        // ステージ設定定義
+        function loadStage(stage) {
+            currentStage = stage;
+            stageInfo.innerText = "STAGE " + stage;
+
+            // ボールの初期位置と速度をリセット
+            ball.x = canvas.width / 2;
+            ball.y = canvas.height / 2;
+            ball.dx = (Math.random() > 0.5 ? 1 : -1) * 3;
+            ball.dy = -4;
+
+            // 画面幅から列数を計算
+            brickColumnCount = Math.floor(canvas.width / (brickWidth + brickPadding));
+            const brickOffsetLeft = (canvas.width - (brickColumnCount * (brickWidth + brickPadding)) + brickPadding) / 2;
+
+            if (stage === 1) {
+                // ステージ1：練習（スキマなし、遅め）
+                ball.baseSpeed = 6;
+                brickRowCount = 4;
+                createBricksRandom(brickColumnCount, brickRowCount, brickOffsetLeft, 1.0);
+            }
+            else if (stage === 2) {
+                // ステージ2：スキマあり、少し速い
+                ball.baseSpeed = 8;
+                brickRowCount = 6;
+                // 30%の確率でブロックがない隙間を作る
+                createBricksRandom(brickColumnCount, brickRowCount, brickOffsetLeft, 0.7);
+            }
+            else if (stage === 3) {
+                // ステージ3：高速＆階段状の配置
+                ball.baseSpeed = 10;
+                brickRowCount = 8;
+                createBricksPyramid(brickColumnCount, brickRowCount, brickOffsetLeft);
+            }
+        }
+
+        // ブロック生成 (確率 distribution で隙間を作る)
+        function createBricksRandom(cols, rows, offsetL, chance) {
+            bricks = [];
+            for (let c = 0; c < cols; c++) {
+                bricks[c] = [];
+                for (let r = 0; r < rows; r++) {
+                    const status = Math.random() < chance ? 1 : 0;
+                    bricks[c][r] = { x: 0, y: 0, status: status, baseColorY: r, offsetL: offsetL };
+                }
+            }
+        }
+
+        // ブロック生成 (ピラミッド/階段状)
+        function createBricksPyramid(cols, rows, offsetL) {
+            bricks = [];
+            for (let c = 0; c < cols; c++) {
+                bricks[c] = [];
+                for (let r = 0; r < rows; r++) {
+                    // 中央に近いほど下までブロックがある
+                    const distFromCenter = Math.abs(c - cols / 2);
+                    const status = (rows - r > distFromCenter) ? 1 : 0;
+                    bricks[c][r] = { x: 0, y: 0, status: status, baseColorY: r, offsetL: offsetL };
+                }
             }
         }
 
         // --- トランポリン（線）の管理 ---
         const trampolines = [];
         let drawingLine = null;
-        let lineDrawCount = 0; // 線を引いた回数をカウント
+        let lineDrawCount = 0;
 
-        // 座標取得用ヘルパー（スマホもPCも対応）
+        let lastLineTime = 0; // 最後に線が消えた時刻
+        const cooldownTime = 200; // クールダウン 0.2秒 (200ms)
+
         function getCoords(e) {
-            if (e.touches && e.touches.length > 0) {
-                return { x: e.touches[0].clientX, y: e.touches[0].clientY };
-            }
+            if (e.touches && e.touches.length > 0) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
             return { x: e.clientX, y: e.clientY };
         }
 
-        // なぞり始め
         function startDraw(e) {
             e.preventDefault();
+
+            // クールダウン処理：線が残っているか、消えてから0.2秒経っていないなら弾く
+            if (trampolines.length > 0 || drawingLine !== null) return;
+            const now = Date.now();
+            if (now - lastLineTime < cooldownTime) return;
+
             const pos = getCoords(e);
-
-            // 10回に1回、トリックライン（金色のパドル）になる
             lineDrawCount++;
-            const isTrickLine = (lineDrawCount % 10 === 0);
-
             drawingLine = {
-                start: pos,
-                current: pos, // 現在なぞっている最中の座標
-                isTrick: isTrickLine, // トリックラインかどうか
+                start: pos, current: pos,
+                isTrick: (lineDrawCount % 10 === 0)
             };
         }
 
-        // なぞり中 (長さを制限する)
         function moveDraw(e) {
             e.preventDefault();
             if (drawingLine) {
                 const pos = getCoords(e);
-
-                // 始点と現在のタッチ位置の距離を計算
                 const dx = pos.x - drawingLine.start.x;
                 const dy = pos.y - drawingLine.start.y;
                 const dist = Math.hypot(dx, dy);
-
-                // 線の最大長さを決める (例えば100px)
                 const maxLength = 100;
 
                 if (dist > maxLength) {
-                    // 最大長さを超えたら、方向は同じまま長さを制限する
                     const ratio = maxLength / dist;
-                    drawingLine.current = {
-                        x: drawingLine.start.x + dx * ratio,
-                        y: drawingLine.start.y + dy * ratio
-                    };
+                    drawingLine.current = { x: drawingLine.start.x + dx * ratio, y: drawingLine.start.y + dy * ratio };
                 } else {
                     drawingLine.current = pos;
                 }
             }
         }
 
-        // なぞり終わり
         function endDraw(e) {
             e.preventDefault();
             if (drawingLine) {
                 const dx = drawingLine.current.x - drawingLine.start.x;
                 const dy = drawingLine.current.y - drawingLine.start.y;
 
-                // 短すぎる線は無視する
                 if (Math.hypot(dx, dy) > 10) {
-                    // 古い線を消す（最大3本まで）
-                    if (trampolines.length >= 3) trampolines.shift();
-
-                    // life=100から徐々に減り、0で消える。endの座標はcurrentにする。
-                    trampolines.push({
-                        start: drawingLine.start,
-                        end: drawingLine.current,
-                        life: 100,
-                        isTrick: drawingLine.isTrick
-                    });
+                    // ここでは最大1本しか持たない
+                    trampolines.push({ start: drawingLine.start, end: drawingLine.current, life: 100, isTrick: drawingLine.isTrick });
+                } else {
+                    // 短すぎて描画されなかった場合もクールダウンを発動させないため記録更新
+                    lastLineTime = Date.now();
                 }
                 drawingLine = null;
             }
@@ -176,41 +214,34 @@
         canvas.addEventListener("mousedown", startDraw);
         canvas.addEventListener("mousemove", moveDraw);
         canvas.addEventListener("mouseup", endDraw);
-        // passive:false でブラウザのスワイプ戻りなどのアクションを止める
         canvas.addEventListener("touchstart", startDraw, { passive: false });
         canvas.addEventListener("touchmove", moveDraw, { passive: false });
         canvas.addEventListener("touchend", endDraw);
 
-        // --- 描画関数 ---
+
         function drawBall() {
             ctx.beginPath();
             ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
             ctx.fillStyle = ball.color;
             ctx.fill();
-            ctx.closePath();
-
-            // 少し光らせるエフェクト
             ctx.beginPath();
             ctx.arc(ball.x, ball.y, ball.radius * 2, 0, Math.PI * 2);
             ctx.fillStyle = "rgba(255, 51, 102, 0.2)";
             ctx.fill();
-            ctx.closePath();
         }
 
         function drawBricks() {
             for (let c = 0; c < brickColumnCount; c++) {
                 for (let r = 0; r < brickRowCount; r++) {
-                    if (bricks[c][r].status === 1) {
-                        const brickX = (c * (brickWidth + brickPadding)) + brickOffsetLeft;
-                        const brickY = (r * (brickHeight + brickPadding)) + brickOffsetTop;
-                        bricks[c][r].x = brickX;
-                        bricks[c][r].y = brickY;
+                    const b = bricks[c][r];
+                    if (b.status === 1) {
+                        b.x = (c * (brickWidth + brickPadding)) + b.offsetL;
+                        b.y = (r * (brickHeight + brickPadding)) + brickOffsetTop;
 
                         ctx.beginPath();
-                        ctx.roundRect(brickX, brickY, brickWidth, brickHeight, 4);
-                        ctx.fillStyle = `hsl(${r * 40 + 160}, 80%, 65%)`; // エメラルド〜青っぽいグラデーション
+                        ctx.roundRect(b.x, b.y, brickWidth, brickHeight, 4);
+                        ctx.fillStyle = `hsl(${b.baseColorY * 40 + 160}, 80%, 65%)`;
                         ctx.fill();
-                        ctx.closePath();
                     }
                 }
             }
@@ -219,54 +250,46 @@
         function drawTrampolines() {
             ctx.lineCap = "round";
 
-            // 描画中の線（リアルタイム）
             if (drawingLine) {
                 ctx.beginPath();
                 ctx.moveTo(drawingLine.start.x, drawingLine.start.y);
                 ctx.lineTo(drawingLine.current.x, drawingLine.current.y);
-
-                // トリックラインなら金色、普通なら水色
                 ctx.strokeStyle = drawingLine.isTrick ? "rgba(255, 215, 0, 0.8)" : "rgba(0, 255, 221, 0.5)";
                 ctx.lineWidth = 6;
                 ctx.stroke();
-                ctx.closePath();
             }
 
-            // 完成して画面に残っている線
             for (let i = 0; i < trampolines.length; i++) {
                 const t = trampolines[i];
                 ctx.beginPath();
                 ctx.moveTo(t.start.x, t.start.y);
                 ctx.lineTo(t.end.x, t.end.y);
-
-                // 寿命(life)が減るにつれ透明になっていく
-                if (t.isTrick) {
-                    // トリックライン：黄色〜金色
-                    ctx.strokeStyle = `rgba(255, 215, 0, ${t.life / 100})`;
-                } else {
-                    // 通常ライン：水色
-                    ctx.strokeStyle = `rgba(0, 255, 221, ${t.life / 100})`;
-                }
-
+                ctx.strokeStyle = t.isTrick ? `rgba(255, 215, 0, ${t.life / 100})` : `rgba(0, 255, 221, ${t.life / 100})`;
                 ctx.lineWidth = 6;
                 ctx.stroke();
-                ctx.closePath();
             }
         }
 
-        // 点と線分の最短距離を計算する関数（弾く処理用の数学ヘルパー）
         function getDistanceToSegment(p, a, b) {
             const l2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
             if (l2 == 0) return Math.hypot(p.x - a.x, p.y - a.y);
             let t = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2;
-            t = Math.max(0, Math.min(1, t)); // 線分の端点に丸める
+            t = Math.max(0, Math.min(1, t));
             const proj = { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) };
             return { dist: Math.hypot(p.x - proj.x, p.y - proj.y), proj: proj };
         }
 
-        // 衝突判定ロジック
+        function isStageClear() {
+            for (let c = 0; c < brickColumnCount; c++) {
+                for (let r = 0; r < brickRowCount; r++) {
+                    if (bricks[c][r].status === 1) return false;
+                }
+            }
+            return true;
+        }
+
         function collisionDetection() {
-            // ブロックとの当たり判定
+            let blockHit = false; // Flag to track if any block was hit in this frame
             for (let c = 0; c < brickColumnCount; c++) {
                 for (let r = 0; r < brickRowCount; r++) {
                     const b = bricks[c][r];
@@ -274,79 +297,67 @@
                         if (ball.x + ball.radius > b.x && ball.x - ball.radius < b.x + brickWidth &&
                             ball.y + ball.radius > b.y && ball.y - ball.radius < b.y + brickHeight) {
 
-                            // ボールが当たったらY方向の速度反転
                             ball.dy = -ball.dy;
-                            b.status = 0; // ブロックを消す
+                            b.status = 0;
                             score += 10;
                             scoreText.innerText = score;
 
-                            if (score === brickRowCount * brickColumnCount * 10) {
-                                alert("GAME CLEAR! 全部壊しました！");
-                                document.location.reload();
+                            if (isStageClear()) {
+                                if (currentStage < maxStage) {
+                                    alert("STAGE " + currentStage + " CLEAR! 次のステージへ進みます");
+                                    loadStage(currentStage + 1);
+                                } else {
+                                    alert("CONGRATULATIONS! 全ステージクリア！おめでとう！");
+                                    document.location.reload();
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // 指で描いた線（トランポリン）との当たり判定
             for (let i = trampolines.length - 1; i >= 0; i--) {
                 const t = trampolines[i];
                 const res = getDistanceToSegment(ball, t.start, t.end);
 
-                // ボールが線に触れたら！
                 if (res.dist < ball.radius) {
                     const dx = t.end.x - t.start.x;
                     const dy = t.end.y - t.start.y;
                     const len = Math.hypot(dx, dy);
 
                     if (len > 0) {
-                        // 線に対する「反射」を計算する
                         let nx = -dy / len;
                         let ny = dx / len;
-
                         let dotBall = ball.dx * nx + ball.dy * ny;
+
                         if (dotBall > 0) {
-                            nx = -nx;
-                            ny = -ny;
-                            dotBall = -dotBall;
+                            nx = -nx; ny = -ny; dotBall = -dotBall;
                         }
 
-                        // はねかえる方向を決定
                         ball.dx = ball.dx - 2 * dotBall * nx;
                         ball.dy = ball.dy - 2 * dotBall * ny;
 
-                        // ★トリックラインの処理！★
-                        // トリックライン（金色の線）に当たったら、スピードが1.5倍〜2.0倍のランダムになる（超加速）
                         let speedMulti = 1.0;
                         if (t.isTrick) {
-                            const currentSpeed = Math.hypot(ball.dx, ball.dy);
-                            // 通常の倍率（一定速度にする処理）に、さらに加速倍率をかける
-                            const trickBoost = 1.5 + Math.random() * 0.5; // 1.5倍〜2.0倍
-                            speedMulti = (ball.baseSpeed * trickBoost) / (currentSpeed || 1);
-
-                            // 画面が一瞬黄色にフラッシュするド派手エフェクト
+                            const curSpd = Math.hypot(ball.dx, ball.dy);
+                            const trickBoost = 1.5 + Math.random() * 0.5;
+                            speedMulti = (ball.baseSpeed * trickBoost) / (curSpd || 1);
                             canvas.style.backgroundColor = "rgba(255, 215, 0, 0.3)";
                             setTimeout(() => { canvas.style.backgroundColor = "#1a1a1a"; }, 100);
                         } else {
-                            // はねかえるスピードを一定にしてゲームをテンポ良くする（通常線）
-                            const currentSpeed = Math.hypot(ball.dx, ball.dy);
-                            speedMulti = ball.baseSpeed / (currentSpeed || 1);
-
-                            // 通常の少しフラッシュエフェクト
+                            const curSpd = Math.hypot(ball.dx, ball.dy);
+                            speedMulti = ball.baseSpeed / (curSpd || 1);
                             canvas.style.backgroundColor = "#2a2a2a";
                             setTimeout(() => { canvas.style.backgroundColor = "#1a1a1a"; }, 50);
                         }
 
                         ball.dx *= speedMulti;
                         ball.dy *= speedMulti;
-
-                        // ボールがめり込まないように少し押し出す
                         ball.x += nx * (ball.radius - res.dist);
                         ball.y += ny * (ball.radius - res.dist);
 
-                        // 当たったトランポリンはすぐ消える（壊れる）
-                        trampolines.splice(i, 1);
+                        // 当たった直後は少し待機（即座に連続で消えるのを防ぐ）
+                        t.life = 0; // すぐに消すようマーク
                     }
                 }
             }
@@ -355,27 +366,16 @@
         // --- メインループ ---
         function update() {
             if (isGameOver) return;
-
-            // 画面をクリア
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // 要素の描画
             drawBricks();
             drawTrampolines();
             drawBall();
 
-            // 当たり判定チェック
             collisionDetection();
 
-            // 左右の壁で反射
-            if (ball.x + ball.dx > canvas.width - ball.radius || ball.x + ball.dx < ball.radius) {
-                ball.dx = -ball.dx;
-            }
-            // 天井で反射
-            if (ball.y + ball.dy < ball.radius) {
-                ball.dy = -ball.dy;
-            }
-            // 床に落ちたらゲームオーバー
+            if (ball.x + ball.dx > canvas.width - ball.radius || ball.x + ball.dx < ball.radius) ball.dx = -ball.dx;
+            if (ball.y + ball.dy < ball.radius) ball.dy = -ball.dy;
             else if (ball.y + ball.dy > canvas.height - ball.radius) {
                 isGameOver = true;
                 setTimeout(() => {
@@ -384,23 +384,23 @@
                 }, 100);
             }
 
-            // ボールの移動
             ball.x += ball.dx;
             ball.y += ball.dy;
 
-            // トランポリンの寿命(life)を減らす
             for (let i = trampolines.length - 1; i >= 0; i--) {
-                trampolines[i].life -= 2; // 少しずつ消える
+                trampolines[i].life -= 2;
                 if (trampolines[i].life <= 0) {
-                    trampolines.splice(i, 1); // 0になったら完全に消去
+                    trampolines.splice(i, 1);
+                    // 完全に線が消えた時刻を記録
+                    lastLineTime = Date.now();
                 }
             }
 
-            // 次のフレームを描画
             requestAnimationFrame(update);
         }
 
-        // ゲームスタート
+        // 初回ステージ読み込みと開始
+        loadStage(1);
         update();
     </script>
 </body>
