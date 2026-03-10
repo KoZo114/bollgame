@@ -28,30 +28,9 @@
             pointer-events: none;
         }
 
-        #soundToggle {
-            position: absolute;
-            top: 15px;
-            right: 15px;
-            font-size: 24px;
-            cursor: pointer;
-            background: rgba(0, 0, 0, 0.5);
-            border: 1px solid #555;
-            color: #fff;
-            padding: 5px 10px;
-            border-radius: 5px;
-            user-select: none;
-            z-index: 100;
-        }
-
         h2 {
             margin: 0;
             font-size: 24px;
-        }
-
-        p {
-            margin: 5px 0 0 0;
-            font-size: 14px;
-            color: #ccc;
         }
 
         #stageInfo {
@@ -68,9 +47,7 @@
         <div id="stageInfo">STAGE 1 <span id="livesContainer"
                 style="color: #FF3366; margin-left:15px; font-size: 18px;">♥♥</span></div>
         <h2>Score: <span id="scoreText">0</span></h2>
-        <p>線を引いてボールを跳ね返そう！(0.2秒待機あり)</p>
     </div>
-    <div id="soundToggle">🔇 音声オフ</div>
     <canvas id="gameCanvas"></canvas>
 
     <script>
@@ -102,8 +79,7 @@
 
         // --- オーディオ設定 (Web Audio API) ---
         let audioCtx;
-        let isSoundEnabled = false;
-        const soundToggle = document.getElementById("soundToggle");
+        let isSoundEnabled = true; // デフォルトでON
 
         function initAudio() {
             if (!audioCtx) {
@@ -112,16 +88,8 @@
             if (audioCtx.state === 'suspended') {
                 audioCtx.resume();
             }
+            startBGM(); // 初期化時にBGMスタート
         }
-
-        soundToggle.addEventListener("click", () => {
-            isSoundEnabled = !isSoundEnabled;
-            soundToggle.innerText = isSoundEnabled ? "🔊 音声オン" : "🔇 音声オフ";
-            if (isSoundEnabled) {
-                initAudio();
-                startBGM(); // 音がオンになったらBGM再生ループを開始/再開
-            }
-        });
 
         // 効果音（SE）を鳴らす関数
         function playSE(freq, type = 'sine', duration = 0.1, vol = 0.1, slideFreq = null) {
@@ -163,8 +131,8 @@
             if (!isSoundEnabled || isGameOver || !audioCtx) return;
             const now = Date.now();
             if (now - lastBgmTime > bgmTempo) {
-                // ボリュームをごく小さくして裏でポロポロ鳴らす
-                playSE(bgmNotes[bgmStep % bgmNotes.length], 'square', 0.15, 0.02);
+                // ボリュームをさらに小さく（0.02 -> 0.005）して裏でポロポロ鳴らす
+                playSE(bgmNotes[bgmStep % bgmNotes.length], 'square', 0.15, 0.005);
                 bgmStep++;
                 lastBgmTime = now;
             }
@@ -232,16 +200,40 @@
             }
         }
 
-        // ブロック生成 (ピラミッド/階段状)
+        // ブロック生成 (ピラミッド/階段状) + ステージ3用の消えないブロック
         function createBricksPyramid(cols, rows, offsetL) {
             bricks = [];
+
+            // 消えないブロックを置く場所をあらかじめ決める (3箇所くらい)
+            const indestructiblePositions = [
+                { c: Math.floor(cols / 2), r: rows - 1 }, // ど真ん中の一番下
+                { c: Math.floor(cols / 4), r: Math.floor(rows / 2) }, // 左の中腹
+                { c: Math.floor(cols * 3 / 4), r: Math.floor(rows / 2) } // 右の中腹
+            ];
+
             for (let c = 0; c < cols; c++) {
                 bricks[c] = [];
                 for (let r = 0; r < rows; r++) {
-                    // 中央に近いほど下までブロックがある
                     const distFromCenter = Math.abs(c - cols / 2);
-                    const status = (rows - r > distFromCenter) ? 1 : 0;
-                    bricks[c][r] = { x: 0, y: 0, status: status, baseColorY: r, offsetL: offsetL };
+                    let status = (rows - r > distFromCenter) ? 1 : 0;
+
+                    // 特殊な消えないブロックかどうか判定
+                    let isIndestructible = false;
+                    for (let pos of indestructiblePositions) {
+                        if (pos.c === c && pos.r === r) {
+                            status = 2; // status 2 = 消えないブロック
+                            isIndestructible = true;
+                            break;
+                        }
+                    }
+
+                    bricks[c][r] = {
+                        x: 0, y: 0,
+                        status: status,
+                        baseColorY: r,
+                        offsetL: offsetL,
+                        isIndestructible: isIndestructible
+                    };
                 }
             }
         }
@@ -336,13 +328,21 @@
             for (let c = 0; c < brickColumnCount; c++) {
                 for (let r = 0; r < brickRowCount; r++) {
                     const b = bricks[c][r];
-                    if (b.status === 1) {
+                    if (b.status === 1 || b.status === 2) {
                         b.x = (c * (brickWidth + brickPadding)) + b.offsetL;
                         b.y = (r * (brickHeight + brickPadding)) + brickOffsetTop;
 
                         ctx.beginPath();
                         ctx.roundRect(b.x, b.y, brickWidth, brickHeight, 4);
-                        ctx.fillStyle = `hsl(${b.baseColorY * 40 + 160}, 80%, 65%)`;
+
+                        if (b.status === 2) {
+                            // 消えないブロックは灰色
+                            ctx.fillStyle = "#888888";
+                        } else {
+                            // 通常のブロックはグラデーション色
+                            ctx.fillStyle = `hsl(${b.baseColorY * 40 + 160}, 80%, 65%)`;
+                        }
+
                         ctx.fill();
                     }
                 }
@@ -395,27 +395,34 @@
             for (let c = 0; c < brickColumnCount; c++) {
                 for (let r = 0; r < brickRowCount; r++) {
                     const b = bricks[c][r];
-                    if (b.status === 1) {
+                    if (b.status === 1 || b.status === 2) {
                         if (ball.x + ball.radius > b.x && ball.x - ball.radius < b.x + brickWidth &&
                             ball.y + ball.radius > b.y && ball.y - ball.radius < b.y + brickHeight) {
 
                             ball.dy = -ball.dy;
-                            b.status = 0;
-                            score += 10;
-                            scoreText.innerText = score;
-                            playSE(880, 'square', 0.1, 0.05); // ピコッ（ブロック破壊）
 
-                            if (isStageClear()) {
-                                if (currentStage < maxStage) {
-                                    playSE(523.25, 'triangle', 0.2, 0.1, 1046.5); // ステージクリア音
-                                    // BGMの音程を少し上げる（難易度アップの演出）
-                                    for (let i = 0; i < bgmNotes.length; i++) bgmNotes[i] *= 1.059463; // 半音上げ
-                                    alert("STAGE " + currentStage + " CLEAR! 次のステージへ進みます");
-                                    loadStage(currentStage + 1);
-                                } else {
-                                    playSE(1046.5, 'triangle', 0.5, 0.1, 2093); // 全クリア音
-                                    alert("CONGRATULATIONS! 全ステージクリア！おめでとう！");
-                                    document.location.reload();
+                            if (b.status === 2) {
+                                // 消えないブロックの場合、硬い音が鳴るだけでスコアは入らず壊れない
+                                playSE(200, 'square', 0.05, 0.05); // カンッという低い音
+                            } else {
+                                // 通常のブロックの場合
+                                b.status = 0;
+                                score += 10;
+                                scoreText.innerText = score;
+                                playSE(880, 'square', 0.1, 0.05); // ピコッ（ブロック破壊）
+
+                                if (isStageClear()) {
+                                    if (currentStage < maxStage) {
+                                        playSE(523.25, 'triangle', 0.2, 0.1, 1046.5); // ステージクリア音
+                                        // BGMの音程を少し上げる（難易度アップの演出）
+                                        for (let i = 0; i < bgmNotes.length; i++) bgmNotes[i] *= 1.059463; // 半音上げ
+                                        alert("STAGE " + currentStage + " CLEAR! 次のステージへ進みます");
+                                        loadStage(currentStage + 1);
+                                    } else {
+                                        playSE(1046.5, 'triangle', 0.5, 0.1, 2093); // 全クリア音
+                                        alert("CONGRATULATIONS! 全ステージクリア！おめでとう！");
+                                        document.location.reload();
+                                    }
                                 }
                             }
                         }
