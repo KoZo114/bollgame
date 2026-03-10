@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ブロック崩し - トランポリンモード</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #1a1a1a;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        canvas {
+            display: block;
+            transition: background-color 0.1s;
+        }
+
+        #ui {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            color: #fff;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            pointer-events: none;
+            /* UIの裏でもタッチできるようにする */
+        }
+
+        h2 {
+            margin: 0;
+            font-size: 24px;
+        }
+
+        p {
+            margin: 5px 0 0 0;
+            font-size: 14px;
+            color: #ccc;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="ui">
+        <h2>Score: <span id="scoreText">0</span></h2>
+        <p>画面をなぞって線をひき、ボールを跳ね返そう！</p>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const scoreText = document.getElementById("scoreText");
+
+        // 画面サイズ調整
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener("resize", resize);
+        resize();
+
+        let isGameOver = false;
+        let score = 0;
+
+        // ボールの設定
+        const ball = {
+            x: window.innerWidth / 2,
+            y: window.innerHeight / 2, // 画面中央からスタート
+            radius: 8,
+            dx: (Math.random() > 0.5 ? 1 : -1) * 3, // 少しゆっくりスタート
+            dy: -4,
+            baseSpeed: 7, // 跳ね返したときの基本スピード
+            color: "#FF3366" // ネオンピンク
+        };
+
+        // ブロックの設定
+        const brickRowCount = 6;
+        const brickColumnCount = Math.floor(canvas.width / 60);
+        const brickPadding = 8;
+        const brickOffsetTop = 100;
+        const brickOffsetLeft = (canvas.width - (brickColumnCount * 60)) / 2;
+        const brickWidth = 60 - brickPadding;
+        const brickHeight = 20;
+
+        const bricks = [];
+        for (let c = 0; c < brickColumnCount; c++) {
+            bricks[c] = [];
+            for (let r = 0; r < brickRowCount; r++) {
+                bricks[c][r] = { x: 0, y: 0, status: 1 };
+            }
+        }
+
+        // --- トランポリン（線）の管理 ---
+        const trampolines = [];
+        let drawingLine = null;
+
+        // 座標取得用ヘルパー（スマホもPCも対応）
+        function getCoords(e) {
+            if (e.touches && e.touches.length > 0) {
+                return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }
+            return { x: e.clientX, y: e.clientY };
+        }
+
+        // なぞり始め
+        function startDraw(e) {
+            e.preventDefault();
+            const pos = getCoords(e);
+            drawingLine = { start: pos, end: pos };
+        }
+
+        // なぞり中
+        function moveDraw(e) {
+            e.preventDefault();
+            if (drawingLine) {
+                drawingLine.end = getCoords(e);
+            }
+        }
+
+        // なぞり終わり
+        function endDraw(e) {
+            e.preventDefault();
+            if (drawingLine) {
+                const dx = drawingLine.end.x - drawingLine.start.x;
+                const dy = drawingLine.end.y - drawingLine.start.y;
+
+                // 短すぎる線は無視する
+                if (Math.hypot(dx, dy) > 10) {
+                    // 最大3本まで残す（それより古いのは消す）
+                    if (trampolines.length >= 3) trampolines.shift();
+
+                    // life=100から徐々に減り、0で消える
+                    trampolines.push({ ...drawingLine, life: 100 });
+                }
+                drawingLine = null;
+            }
+        }
+
+        canvas.addEventListener("mousedown", startDraw);
+        canvas.addEventListener("mousemove", moveDraw);
+        canvas.addEventListener("mouseup", endDraw);
+        // passive:false でブラウザのスワイプ戻りなどのアクションを止める
+        canvas.addEventListener("touchstart", startDraw, { passive: false });
+        canvas.addEventListener("touchmove", moveDraw, { passive: false });
+        canvas.addEventListener("touchend", endDraw);
+
+        // --- 描画関数 ---
+        function drawBall() {
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+            ctx.fillStyle = ball.color;
+            ctx.fill();
+            ctx.closePath();
+
+            // 少し光らせるエフェクト
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius * 2, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(255, 51, 102, 0.2)";
+            ctx.fill();
+            ctx.closePath();
+        }
+
+        function drawBricks() {
+            for (let c = 0; c < brickColumnCount; c++) {
+                for (let r = 0; r < brickRowCount; r++) {
+                    if (bricks[c][r].status === 1) {
+                        const brickX = (c * (brickWidth + brickPadding)) + brickOffsetLeft;
+                        const brickY = (r * (brickHeight + brickPadding)) + brickOffsetTop;
+                        bricks[c][r].x = brickX;
+                        bricks[c][r].y = brickY;
+
+                        ctx.beginPath();
+                        ctx.roundRect(brickX, brickY, brickWidth, brickHeight, 4);
+                        ctx.fillStyle = `hsl(${r * 40 + 160}, 80%, 65%)`; // エメラルド〜青っぽいグラデーション
+                        ctx.fill();
+                        ctx.closePath();
+                    }
+                }
+            }
+        }
+
+        function drawTrampolines() {
+            ctx.lineCap = "round";
+
+            // 描画中の線（リアルタイム）
+            if (drawingLine) {
+                ctx.beginPath();
+                ctx.moveTo(drawingLine.start.x, drawingLine.start.y);
+                ctx.lineTo(drawingLine.end.x, drawingLine.end.y);
+                ctx.strokeStyle = "rgba(0, 255, 221, 0.5)"; // 水色の半透明
+                ctx.lineWidth = 6;
+                ctx.stroke();
+                ctx.closePath();
+            }
+
+            // 完成して画面に残っている線
+            for (let i = 0; i < trampolines.length; i++) {
+                const t = trampolines[i];
+                ctx.beginPath();
+                ctx.moveTo(t.start.x, t.start.y);
+                ctx.lineTo(t.end.x, t.end.y);
+                // 寿命(life)が減るにつれ透明になっていく
+                ctx.strokeStyle = `rgba(0, 255, 221, ${t.life / 100})`;
+                ctx.lineWidth = 6;
+                ctx.stroke();
+                ctx.closePath();
+            }
+        }
+
+        // 点と線分の最短距離を計算する関数（弾く処理用の数学ヘルパー）
+        function getDistanceToSegment(p, a, b) {
+            const l2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+            if (l2 == 0) return Math.hypot(p.x - a.x, p.y - a.y);
+            let t = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2;
+            t = Math.max(0, Math.min(1, t)); // 線分の端点に丸める
+            const proj = { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) };
+            return { dist: Math.hypot(p.x - proj.x, p.y - proj.y), proj: proj };
+        }
+
+        // 衝突判定ロジック
+        function collisionDetection() {
+            // ブロックとの当たり判定
+            for (let c = 0; c < brickColumnCount; c++) {
+                for (let r = 0; r < brickRowCount; r++) {
+                    const b = bricks[c][r];
+                    if (b.status === 1) {
+                        if (ball.x + ball.radius > b.x && ball.x - ball.radius < b.x + brickWidth &&
+                            ball.y + ball.radius > b.y && ball.y - ball.radius < b.y + brickHeight) {
+
+                            // ボールが当たったらY方向の速度反転
+                            ball.dy = -ball.dy;
+                            b.status = 0; // ブロックを消す
+                            score += 10;
+                            scoreText.innerText = score;
+
+                            if (score === brickRowCount * brickColumnCount * 10) {
+                                alert("GAME CLEAR! 全部壊しました！");
+                                document.location.reload();
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 指で描いた線（トランポリン）との当たり判定
+            for (let i = trampolines.length - 1; i >= 0; i--) {
+                const t = trampolines[i];
+                const res = getDistanceToSegment(ball, t.start, t.end);
+
+                // ボールが線に触れたら！
+                if (res.dist < ball.radius) {
+                    const dx = t.end.x - t.start.x;
+                    const dy = t.end.y - t.start.y;
+                    const len = Math.hypot(dx, dy);
+
+                    if (len > 0) {
+                        // 線に対する「反射」を計算する
+                        let nx = -dy / len;
+                        let ny = dx / len;
+
+                        let dotBall = ball.dx * nx + ball.dy * ny;
+                        if (dotBall > 0) {
+                            nx = -nx;
+                            ny = -ny;
+                            dotBall = -dotBall;
+                        }
+
+                        // はねかえる方向を決定
+                        ball.dx = ball.dx - 2 * dotBall * nx;
+                        ball.dy = ball.dy - 2 * dotBall * ny;
+
+                        // はねかえるスピードを一定にしてゲームをテンポ良くする
+                        const currentSpeed = Math.hypot(ball.dx, ball.dy);
+                        const speedMulti = ball.baseSpeed / (currentSpeed || 1);
+                        ball.dx *= speedMulti;
+                        ball.dy *= speedMulti;
+
+                        // ボールがめり込まないように少し押し出す
+                        ball.x += nx * (ball.radius - res.dist);
+                        ball.y += ny * (ball.radius - res.dist);
+
+                        // 当たったトランポリンはすぐ消える（壊れる）
+                        trampolines.splice(i, 1);
+
+                        // 弾いた瞬間のちょっとした画面フラッシュエフェクト
+                        canvas.style.backgroundColor = "#2a2a2a";
+                        setTimeout(() => { canvas.style.backgroundColor = "#1a1a1a"; }, 50);
+                    }
+                }
+            }
+        }
+
+        // --- メインループ ---
+        function update() {
+            if (isGameOver) return;
+
+            // 画面をクリア
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 要素の描画
+            drawBricks();
+            drawTrampolines();
+            drawBall();
+
+            // 当たり判定チェック
+            collisionDetection();
+
+            // 左右の壁で反射
+            if (ball.x + ball.dx > canvas.width - ball.radius || ball.x + ball.dx < ball.radius) {
+                ball.dx = -ball.dx;
+            }
+            // 天井で反射
+            if (ball.y + ball.dy < ball.radius) {
+                ball.dy = -ball.dy;
+            }
+            // 床に落ちたらゲームオーバー
+            else if (ball.y + ball.dy > canvas.height - ball.radius) {
+                isGameOver = true;
+                setTimeout(() => {
+                    alert("GAME OVER... \n スコア: " + score);
+                    document.location.reload();
+                }, 100);
+            }
+
+            // ボールの移動
+            ball.x += ball.dx;
+            ball.y += ball.dy;
+
+            // トランポリンの寿命(life)を減らす
+            for (let i = trampolines.length - 1; i >= 0; i--) {
+                trampolines[i].life -= 2; // 少しずつ消える
+                if (trampolines[i].life <= 0) {
+                    trampolines.splice(i, 1); // 0になったら完全に消去
+                }
+            }
+
+            // 次のフレームを描画
+            requestAnimationFrame(update);
+        }
+
+        // ゲームスタート
+        update();
+    </script>
+</body>
+
+</html>
