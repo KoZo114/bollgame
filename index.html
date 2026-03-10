@@ -96,6 +96,7 @@
         // --- トランポリン（線）の管理 ---
         const trampolines = [];
         let drawingLine = null;
+        let lineDrawCount = 0; // 線を引いた回数をカウント
 
         // 座標取得用ヘルパー（スマホもPCも対応）
         function getCoords(e) {
@@ -109,14 +110,42 @@
         function startDraw(e) {
             e.preventDefault();
             const pos = getCoords(e);
-            drawingLine = { start: pos, end: pos };
+
+            // 10回に1回、トリックライン（金色のパドル）になる
+            lineDrawCount++;
+            const isTrickLine = (lineDrawCount % 10 === 0);
+
+            drawingLine = {
+                start: pos,
+                current: pos, // 現在なぞっている最中の座標
+                isTrick: isTrickLine, // トリックラインかどうか
+            };
         }
 
-        // なぞり中
+        // なぞり中 (長さを制限する)
         function moveDraw(e) {
             e.preventDefault();
             if (drawingLine) {
-                drawingLine.end = getCoords(e);
+                const pos = getCoords(e);
+
+                // 始点と現在のタッチ位置の距離を計算
+                const dx = pos.x - drawingLine.start.x;
+                const dy = pos.y - drawingLine.start.y;
+                const dist = Math.hypot(dx, dy);
+
+                // 線の最大長さを決める (例えば100px)
+                const maxLength = 100;
+
+                if (dist > maxLength) {
+                    // 最大長さを超えたら、方向は同じまま長さを制限する
+                    const ratio = maxLength / dist;
+                    drawingLine.current = {
+                        x: drawingLine.start.x + dx * ratio,
+                        y: drawingLine.start.y + dy * ratio
+                    };
+                } else {
+                    drawingLine.current = pos;
+                }
             }
         }
 
@@ -124,16 +153,21 @@
         function endDraw(e) {
             e.preventDefault();
             if (drawingLine) {
-                const dx = drawingLine.end.x - drawingLine.start.x;
-                const dy = drawingLine.end.y - drawingLine.start.y;
+                const dx = drawingLine.current.x - drawingLine.start.x;
+                const dy = drawingLine.current.y - drawingLine.start.y;
 
                 // 短すぎる線は無視する
                 if (Math.hypot(dx, dy) > 10) {
-                    // 最大3本まで残す（それより古いのは消す）
+                    // 古い線を消す（最大3本まで）
                     if (trampolines.length >= 3) trampolines.shift();
 
-                    // life=100から徐々に減り、0で消える
-                    trampolines.push({ ...drawingLine, life: 100 });
+                    // life=100から徐々に減り、0で消える。endの座標はcurrentにする。
+                    trampolines.push({
+                        start: drawingLine.start,
+                        end: drawingLine.current,
+                        life: 100,
+                        isTrick: drawingLine.isTrick
+                    });
                 }
                 drawingLine = null;
             }
@@ -189,8 +223,10 @@
             if (drawingLine) {
                 ctx.beginPath();
                 ctx.moveTo(drawingLine.start.x, drawingLine.start.y);
-                ctx.lineTo(drawingLine.end.x, drawingLine.end.y);
-                ctx.strokeStyle = "rgba(0, 255, 221, 0.5)"; // 水色の半透明
+                ctx.lineTo(drawingLine.current.x, drawingLine.current.y);
+
+                // トリックラインなら金色、普通なら水色
+                ctx.strokeStyle = drawingLine.isTrick ? "rgba(255, 215, 0, 0.8)" : "rgba(0, 255, 221, 0.5)";
                 ctx.lineWidth = 6;
                 ctx.stroke();
                 ctx.closePath();
@@ -202,8 +238,16 @@
                 ctx.beginPath();
                 ctx.moveTo(t.start.x, t.start.y);
                 ctx.lineTo(t.end.x, t.end.y);
+
                 // 寿命(life)が減るにつれ透明になっていく
-                ctx.strokeStyle = `rgba(0, 255, 221, ${t.life / 100})`;
+                if (t.isTrick) {
+                    // トリックライン：黄色〜金色
+                    ctx.strokeStyle = `rgba(255, 215, 0, ${t.life / 100})`;
+                } else {
+                    // 通常ライン：水色
+                    ctx.strokeStyle = `rgba(0, 255, 221, ${t.life / 100})`;
+                }
+
                 ctx.lineWidth = 6;
                 ctx.stroke();
                 ctx.closePath();
@@ -272,9 +316,28 @@
                         ball.dx = ball.dx - 2 * dotBall * nx;
                         ball.dy = ball.dy - 2 * dotBall * ny;
 
-                        // はねかえるスピードを一定にしてゲームをテンポ良くする
-                        const currentSpeed = Math.hypot(ball.dx, ball.dy);
-                        const speedMulti = ball.baseSpeed / (currentSpeed || 1);
+                        // ★トリックラインの処理！★
+                        // トリックライン（金色の線）に当たったら、スピードが1.5倍〜2.0倍のランダムになる（超加速）
+                        let speedMulti = 1.0;
+                        if (t.isTrick) {
+                            const currentSpeed = Math.hypot(ball.dx, ball.dy);
+                            // 通常の倍率（一定速度にする処理）に、さらに加速倍率をかける
+                            const trickBoost = 1.5 + Math.random() * 0.5; // 1.5倍〜2.0倍
+                            speedMulti = (ball.baseSpeed * trickBoost) / (currentSpeed || 1);
+
+                            // 画面が一瞬黄色にフラッシュするド派手エフェクト
+                            canvas.style.backgroundColor = "rgba(255, 215, 0, 0.3)";
+                            setTimeout(() => { canvas.style.backgroundColor = "#1a1a1a"; }, 100);
+                        } else {
+                            // はねかえるスピードを一定にしてゲームをテンポ良くする（通常線）
+                            const currentSpeed = Math.hypot(ball.dx, ball.dy);
+                            speedMulti = ball.baseSpeed / (currentSpeed || 1);
+
+                            // 通常の少しフラッシュエフェクト
+                            canvas.style.backgroundColor = "#2a2a2a";
+                            setTimeout(() => { canvas.style.backgroundColor = "#1a1a1a"; }, 50);
+                        }
+
                         ball.dx *= speedMulti;
                         ball.dy *= speedMulti;
 
@@ -284,10 +347,6 @@
 
                         // 当たったトランポリンはすぐ消える（壊れる）
                         trampolines.splice(i, 1);
-
-                        // 弾いた瞬間のちょっとした画面フラッシュエフェクト
-                        canvas.style.backgroundColor = "#2a2a2a";
-                        setTimeout(() => { canvas.style.backgroundColor = "#1a1a1a"; }, 50);
                     }
                 }
             }
