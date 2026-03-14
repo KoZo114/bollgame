@@ -314,7 +314,7 @@
                 // ステージ2：スキマあり、少し速い、通常線長
                 ball.baseSpeed = 8;
                 brickRowCount = 6;
-                maxLineLength = 100; // 通常の長さに
+                maxLineLength = 150; // 通常の長さに
                 // 30%の確率でブロックがない隙間を作る
                 createBricksRandom(brickColumnCount, brickRowCount, brickOffsetLeft, 0.7);
             }
@@ -322,7 +322,7 @@
                 // ステージ3：高速＆階段状の配置
                 ball.baseSpeed = 10;
                 brickRowCount = 8;
-                maxLineLength = 90; // 少し短めに
+                maxLineLength = 110; // 少し短めに
                 createBricksPyramid(brickColumnCount, brickRowCount, brickOffsetLeft);
             }
         }
