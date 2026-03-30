@@ -128,24 +128,25 @@
         let score = 0;
         let currentStage = 1;
         const maxStage = 3;
-        let lives = 3; // ライフを追加
+        const initialLives = 3; 
+        let lives = initialLives; 
+        let canReplay = true; 
         const livesContainer = document.getElementById("livesContainer");
 
-        // UIのライフ表示を更新する関数
         function updateLivesUI() {
             let hearts = "";
             for (let i = 0; i < lives; i++) hearts += "♥";
-            livesContainer.innerText = hearts;
+            const container = document.getElementById("livesContainer");
+            if(container) container.innerText = hearts;
         }
 
-        // --- オーディオ設定 (Web Audio API) ---
         let audioCtx = null;
         let isSoundEnabled = true;
 
         function initAudio() {
             if (!audioCtx) {
                 const AudioContext = window.AudioContext || window.webkitAudioContext;
-                if (!AudioContext) return; // Audio API非対応ブラウザ対策
+                if (!AudioContext) return;
                 audioCtx = new AudioContext();
             }
             if (audioCtx.state === 'suspended') {
@@ -154,17 +155,14 @@
             startBGM();
         }
 
-        // スマホやPCのブラウザで確実にAudioContextのロックを解除するためのグローバルリスナー
         function unlockAudio() {
             if (!isSoundEnabled) return;
-
             if (!audioCtx) {
                 initAudio();
             } else if (audioCtx.state === 'suspended') {
                 audioCtx.resume();
             }
 
-            // 無音のオシレーターを鳴らして確実にiOS等のロックを解除するハック
             if (audioCtx && audioCtx.state === 'running') {
                 const osc = audioCtx.createOscillator();
                 const gain = audioCtx.createGain();
@@ -174,80 +172,59 @@
                 osc.start();
                 osc.stop(audioCtx.currentTime + 0.001);
 
-                // 一度解除したらリスナーを消す
                 document.removeEventListener('touchstart', unlockAudio, { capture: true });
                 document.removeEventListener('touchend', unlockAudio, { capture: true });
                 document.removeEventListener('mousedown', unlockAudio, { capture: true });
             }
         }
 
-        // あらゆる画面タップ・クリックに反応させる (passive: falseにして確実に発火)
         document.addEventListener('touchstart', unlockAudio, { capture: true, once: true });
         document.addEventListener('touchend', unlockAudio, { capture: true, once: true });
         document.addEventListener('mousedown', unlockAudio, { capture: true, once: true });
 
-        // スタートボタンの処理
         startButton.addEventListener("click", () => {
-            // ここで確実にAudioContextが初期化される（Tapイベント）
             initAudio();
-
-            // 画面切り替え
             startScreen.style.opacity = "0";
             setTimeout(() => {
                 startScreen.style.display = "none";
                 uiDiv.style.display = "block";
                 canvas.style.display = "block";
-                // リサイズを呼んでCanvasサイズを確定
                 resize();
-
-                // ゲームループ開始
                 gameStarted = true;
                 loadStage(1);
                 update();
             }, 500);
         });
 
-        // 効果音（SE）を鳴らす関数
         function playSE(freq, type = 'sine', duration = 0.1, vol = 0.1, slideFreq = null) {
             if (!isSoundEnabled || !audioCtx) return;
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
-
             osc.type = type;
             osc.connect(gain);
             gain.connect(audioCtx.destination);
-
             const now = audioCtx.currentTime;
             osc.frequency.setValueAtTime(freq, now);
-            if (slideFreq) {
-                // ピッチベンド（音がギュイーンと滑る）
-                osc.frequency.exponentialRampToValueAtTime(slideFreq, now + duration);
-            }
-
-            // アタック＆リリース（プツッというノイズを防ぐ）
+            if (slideFreq) osc.frequency.exponentialRampToValueAtTime(slideFreq, now + duration);
             gain.gain.setValueAtTime(0, now);
             gain.gain.linearRampToValueAtTime(vol, now + 0.01);
             gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-
             osc.start(now);
             osc.stop(now + duration);
         }
 
-        // BGM（短いループ）のシーケンサー
         let bgmStep = 0;
         let lastBgmTime = 0;
-        const bgmTempo = 200; // ms
-        // ドミソド〜 シレソシ〜 というシンプルな8bit風ベースライン
+        const bgmTempo = 200;
         const bgmNotes = [
-            130.81, 164.81, 196.00, 261.63, // C3, E3, G3, C4
-            123.47, 146.83, 196.00, 246.94  // B2, D3, G3, B3
+            130.81, 164.81, 196.00, 261.63,
+            123.47, 146.83, 196.00, 246.94
         ];
 
         function updateBGM() {
             if (!isSoundEnabled || isGameOver || !audioCtx) return;
             const now = Date.now();
             if (now - lastBgmTime > bgmTempo) {
-                // ボリュームをさらに小さく（0.02 -> 0.005）して裏でポロポロ鳴らす
                 playSE(bgmNotes[bgmStep % bgmNotes.length], 'square', 0.15, 0.005);
                 bgmStep++;
                 lastBgmTime = now;
@@ -257,9 +234,7 @@
             lastBgmTime = Date.now();
         }
 
-        // ボール（初期値は仮。ステージ開始時に上書き）
         const ball = { x: 0, y: 0, radius: 8, dx: 0, dy: 0, baseSpeed: 7, color: "#FF3366" };
-
         let bricks = [];
         let brickColumnCount = 0;
         let brickRowCount = 0;
@@ -267,67 +242,41 @@
         const brickOffsetTop = 120;
         const brickWidth = 52;
         const brickHeight = 20;
+        let maxLineLength = 100;
 
-        let maxLineLength = 100; // ステージごとに変更する線の最大長
-
-        // ステージ設定定義
         function loadStage(stage) {
             currentStage = stage;
-
-            // ハートもUIとして再描画する
-            let hearts = "";
-            for (let i = 0; i < lives; i++) hearts += "♥";
-            stageInfo.innerHTML = `STAGE ${stage} <span id="livesContainer" style="color: #FF3366; margin-left:15px; font-size: 18px;">${hearts}</span>`;
-
-            // ライフUI更新用の参照を取り直す
-            const newLivesContainer = document.getElementById("livesContainer");
-            if (newLivesContainer) {
-                // グローバルの更新関数を今のDOMで上書き
-                window.updateLivesUI = function () {
-                    let h = "";
-                    for (let i = 0; i < lives; i++) h += "♥";
-                    if (document.getElementById("livesContainer")) {
-                        document.getElementById("livesContainer").innerText = h;
-                    }
-                };
-            }
-
-            // ボールの初期位置と速度をリセット
+            updateLivesUI();
+            
             ball.x = canvas.width / 2;
             ball.y = canvas.height / 2;
             ball.dx = (Math.random() > 0.5 ? 1 : -1) * 3;
             ball.dy = -4;
-            ball.radius = 8; // 新しいステージではボールサイズもリセット
+            ball.radius = 8;
 
-            // 画面幅から列数を計算
             brickColumnCount = Math.floor(canvas.width / (brickWidth + brickPadding));
             const brickOffsetLeft = (canvas.width - (brickColumnCount * (brickWidth + brickPadding)) + brickPadding) / 2;
 
             if (stage === 1) {
-                // ステージ1：練習（スキマなし、遅め、線が長く引ける）
                 ball.baseSpeed = 6;
                 brickRowCount = 4;
-                maxLineLength = 200; // 長めに引ける
+                maxLineLength = 200;
                 createBricksRandom(brickColumnCount, brickRowCount, brickOffsetLeft, 1.0);
             }
             else if (stage === 2) {
-                // ステージ2：スキマあり、少し速い、通常線長
                 ball.baseSpeed = 8;
                 brickRowCount = 6;
-                maxLineLength = 150; // 通常の長さに
-                // 30%の確率でブロックがない隙間を作る
+                maxLineLength = 150; 
                 createBricksRandom(brickColumnCount, brickRowCount, brickOffsetLeft, 0.7);
             }
             else if (stage === 3) {
-                // ステージ3：高速＆階段状の配置
                 ball.baseSpeed = 10;
                 brickRowCount = 8;
-                maxLineLength = 110; // 少し短めに
+                maxLineLength = 110;
                 createBricksPyramid(brickColumnCount, brickRowCount, brickOffsetLeft);
             }
         }
 
-        // ブロック生成 (確率 distribution で隙間を作る)
         function createBricksRandom(cols, rows, offsetL, chance) {
             bricks = [];
             for (let c = 0; c < cols; c++) {
@@ -339,50 +288,35 @@
             }
         }
 
-        // ブロック生成 (ピラミッド/階段状) + ステージ3用の消えないブロック
         function createBricksPyramid(cols, rows, offsetL) {
             bricks = [];
-
-            // 消えないブロックを置く場所をあらかじめ決める (3箇所くらい)
             const indestructiblePositions = [
-                { c: Math.floor(cols / 4), r: Math.floor(rows / 2) }, // 左の中腹
-                { c: Math.floor(cols * 3 / 4), r: Math.floor(rows / 2) } // 右の中腹
+                { c: Math.floor(cols / 4), r: Math.floor(rows / 2) },
+                { c: Math.floor(cols * 3 / 4), r: Math.floor(rows / 2) }
             ];
-
             for (let c = 0; c < cols; c++) {
                 bricks[c] = [];
                 for (let r = 0; r < rows; r++) {
                     const distFromCenter = Math.abs(c - cols / 2);
                     let status = (rows - r > distFromCenter) ? 1 : 0;
-
-                    // 特殊な消えないブロックかどうか判定
                     let isIndestructible = false;
                     for (let pos of indestructiblePositions) {
                         if (pos.c === c && pos.r === r) {
-                            status = 2; // status 2 = 消えないブロック
+                            status = 2;
                             isIndestructible = true;
                             break;
                         }
                     }
-
-                    bricks[c][r] = {
-                        x: 0, y: 0,
-                        status: status,
-                        baseColorY: r,
-                        offsetL: offsetL,
-                        isIndestructible: isIndestructible
-                    };
+                    bricks[c][r] = { x: 0, y: 0, status: status, baseColorY: r, offsetL: offsetL, isIndestructible: isIndestructible };
                 }
             }
         }
 
-        // --- トランポリン（線）の管理 ---
         const trampolines = [];
         let drawingLine = null;
         let lineDrawCount = 0;
-
-        let lastLineTime = 0; // 最後に線が消えた時刻
-        const cooldownTime = 200; // クールダウン 0.2秒 (200ms)
+        let lastLineTime = 0;
+        const cooldownTime = 200;
 
         function getCoords(e) {
             if (e.touches && e.touches.length > 0) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
@@ -390,33 +324,17 @@
         }
 
         function startDraw(e) {
-            // 初回タッチ時にAudioContextを初期化（ブラウザの自動再生ブロック対策）
             if (isSoundEnabled && !audioCtx) initAudio();
-
             e.preventDefault();
-
-            // クールダウン処理：線が残っているか、消えてから0.2秒経っていないなら弾く
             if (trampolines.length > 0 || drawingLine !== null) return;
             const now = Date.now();
             if (now - lastLineTime < cooldownTime) return;
-
             const pos = getCoords(e);
             lineDrawCount++;
-
-            let trickType = 0; // 0:通常, 1:加速(黄色), 2:縮小(紫色)
-
-            // 10回に1回は黄色の加速線。
-            // ステージ3では、それとは別に「5回に1回」紫の縮小線が出るようにする
-            if (lineDrawCount % 10 === 0) {
-                trickType = 1; // 加速
-            } else if (currentStage === 3 && lineDrawCount % 5 === 0) {
-                trickType = 2; // ボール縮小
-            }
-
-            drawingLine = {
-                start: pos, current: pos,
-                trickType: trickType
-            };
+            let trickType = 0;
+            if (lineDrawCount % 10 === 0) trickType = 1;
+            else if (currentStage === 3 && lineDrawCount % 5 === 0) trickType = 2;
+            drawingLine = { start: pos, current: pos, trickType: trickType };
         }
 
         function moveDraw(e) {
@@ -426,7 +344,6 @@
                 const dx = pos.x - drawingLine.start.x;
                 const dy = pos.y - drawingLine.start.y;
                 const dist = Math.hypot(dx, dy);
-
                 if (dist > maxLineLength) {
                     const ratio = maxLineLength / dist;
                     drawingLine.current = { x: drawingLine.start.x + dx * ratio, y: drawingLine.start.y + dy * ratio };
@@ -441,12 +358,9 @@
             if (drawingLine) {
                 const dx = drawingLine.current.x - drawingLine.start.x;
                 const dy = drawingLine.current.y - drawingLine.start.y;
-
                 if (Math.hypot(dx, dy) > 10) {
-                    // ここでは最大1本しか持たない
                     trampolines.push({ start: drawingLine.start, end: drawingLine.current, life: 100, trickType: drawingLine.trickType });
                 } else {
-                    // 短すぎて描画されなかった場合もクールダウンを発動させないため記録更新
                     lastLineTime = Date.now();
                 }
                 drawingLine = null;
@@ -459,7 +373,6 @@
         canvas.addEventListener("touchstart", startDraw, { passive: false });
         canvas.addEventListener("touchmove", moveDraw, { passive: false });
         canvas.addEventListener("touchend", endDraw);
-
 
         function drawBall() {
             ctx.beginPath();
@@ -479,18 +392,10 @@
                     if (b.status === 1 || b.status === 2) {
                         b.x = (c * (brickWidth + brickPadding)) + b.offsetL;
                         b.y = (r * (brickHeight + brickPadding)) + brickOffsetTop;
-
                         ctx.beginPath();
                         ctx.roundRect(b.x, b.y, brickWidth, brickHeight, 4);
-
-                        if (b.status === 2) {
-                            // 消えないブロックは灰色
-                            ctx.fillStyle = "#888888";
-                        } else {
-                            // 通常のブロックはグラデーション色
-                            ctx.fillStyle = `hsl(${b.baseColorY * 40 + 160}, 80%, 65%)`;
-                        }
-
+                        if (b.status === 2) ctx.fillStyle = "#888888";
+                        else ctx.fillStyle = `hsl(${b.baseColorY * 40 + 160}, 80%, 65%)`;
                         ctx.fill();
                     }
                 }
@@ -499,18 +404,16 @@
 
         function drawTrampolines() {
             ctx.lineCap = "round";
-
             if (drawingLine) {
                 ctx.beginPath();
                 ctx.moveTo(drawingLine.start.x, drawingLine.start.y);
                 ctx.lineTo(drawingLine.current.x, drawingLine.current.y);
-                if (drawingLine.trickType === 1) ctx.strokeStyle = "rgba(255, 215, 0, 0.8)";      // 黄色(加速)
-                else if (drawingLine.trickType === 2) ctx.strokeStyle = "rgba(200, 0, 255, 0.8)"; // 紫色(縮小)
-                else ctx.strokeStyle = "rgba(0, 255, 221, 0.5)";                                  // 通常のシアン色
+                if (drawingLine.trickType === 1) ctx.strokeStyle = "rgba(255, 215, 0, 0.8)";
+                else if (drawingLine.trickType === 2) ctx.strokeStyle = "rgba(200, 0, 255, 0.8)";
+                else ctx.strokeStyle = "rgba(0, 255, 221, 0.5)";
                 ctx.lineWidth = 6;
                 ctx.stroke();
             }
-
             for (let i = 0; i < trampolines.length; i++) {
                 const t = trampolines[i];
                 ctx.beginPath();
@@ -543,57 +446,40 @@
         }
 
         function collisionDetection() {
-            let blockHit = false; // Flag to track if any block was hit in this frame
             for (let c = 0; c < brickColumnCount; c++) {
                 for (let r = 0; r < brickRowCount; r++) {
                     const b = bricks[c][r];
                     if (b.status === 1 || b.status === 2) {
                         if (ball.x + ball.radius > b.x && ball.x - ball.radius < b.x + brickWidth &&
                             ball.y + ball.radius > b.y && ball.y - ball.radius < b.y + brickHeight) {
-
                             ball.dy = -ball.dy;
-
                             if (b.status === 2) {
-                                // 消えないブロックの場合、硬い音が鳴るだけでスコアは入らず壊れない
-                                playSE(200, 'square', 0.05, 0.05); // カンッという低い音
+                                playSE(200, 'square', 0.05, 0.05);
                             } else {
-                                // 通常のブロックの場合
                                 b.status = 0;
                                 score += 10;
                                 scoreText.innerText = score;
-                                playSE(880, 'square', 0.1, 0.05); // ピコッ（ブロック破壊）
-
+                                playSE(880, 'square', 0.1, 0.05);
                                 if (isStageClear()) {
                                     if (currentStage < maxStage) {
-                                        playSE(523.25, 'triangle', 0.2, 0.1, 1046.5); // ステージクリア音
-                                        // BGMの音程を少し上げる（難易度アップの演出）
-                                        for (let i = 0; i < bgmNotes.length; i++) bgmNotes[i] *= 1.059463; // 半音上げ
-
-                                        // window.alert は JavaScript の実行をストップしてしまうため、BGMが止まる原因になります。
-                                        // そのため、アラートを消して、一時停止＆再開の処理に変更します。
-                                        console.log("STAGE CLEAR");
-                                        isGameOver = true; // 一時的にループを止める
-
-                                        // 画面真ん中にクリア表示を少し出してすぐ次にいくような軽い演出
+                                        playSE(523.25, 'triangle', 0.2, 0.1, 1046.5);
+                                        for (let i = 0; i < bgmNotes.length; i++) bgmNotes[i] *= 1.059463;
+                                        isGameOver = true;
                                         ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
                                         ctx.fillRect(0, 0, canvas.width, canvas.height);
                                         ctx.fillStyle = "#00FFDD";
                                         ctx.font = "bold 30px 'Helvetica Neue', Arial, sans-serif";
                                         ctx.textAlign = "center";
                                         ctx.fillText(`STAGE ${currentStage} CLEAR!`, canvas.width / 2, canvas.height / 2);
-                                        ctx.textAlign = "left"; // 戻す
-
+                                        ctx.textAlign = "left";
                                         setTimeout(() => {
-                                            isGameOver = false; // 再開
-                                            // 時刻を更新しないと、停止していた間の時間差で一気にBGMが進んでしまうのを防ぐ
+                                            isGameOver = false;
                                             lastBgmTime = Date.now();
-                                            // 次のステージを読み込んで再開
                                             loadStage(currentStage + 1);
                                             update();
-                                        }, 1500); // 1.5秒後に次へ
-
+                                        }, 1500);
                                     } else {
-                                        playSE(1046.5, 'triangle', 0.5, 0.1, 2093); // 全クリア音
+                                        playSE(1046.5, 'triangle', 0.5, 0.1, 2093);
                                         alert("CONGRATULATIONS! 全ステージクリア！おめでとう！");
                                         document.location.reload();
                                     }
@@ -607,101 +493,108 @@
             for (let i = trampolines.length - 1; i >= 0; i--) {
                 const t = trampolines[i];
                 const res = getDistanceToSegment(ball, t.start, t.end);
-
                 if (res.dist < ball.radius) {
                     const dx = t.end.x - t.start.x;
                     const dy = t.end.y - t.start.y;
                     const len = Math.hypot(dx, dy);
-
                     if (len > 0) {
                         let nx = -dy / len;
                         let ny = dx / len;
                         let dotBall = ball.dx * nx + ball.dy * ny;
-
-                        if (dotBall > 0) {
-                            nx = -nx; ny = -ny; dotBall = -dotBall;
-                        }
-
+                        if (dotBall > 0) { nx = -nx; ny = -ny; dotBall = -dotBall; }
                         ball.dx = ball.dx - 2 * dotBall * nx;
                         ball.dy = ball.dy - 2 * dotBall * ny;
-
                         let speedMulti = 1.0;
-                        if (t.trickType === 1) { // 金色：加速
+                        if (t.trickType === 1) {
                             const curSpd = Math.hypot(ball.dx, ball.dy);
                             const trickBoost = 1.5 + Math.random() * 0.5;
                             speedMulti = (ball.baseSpeed * trickBoost) / (curSpd || 1);
                             canvas.style.backgroundColor = "rgba(255, 215, 0, 0.3)";
-                            playSE(1200, 'sawtooth', 0.3, 0.05, 2400); // ギュイーン！(加速)
+                            playSE(1200, 'sawtooth', 0.3, 0.05, 2400);
                             setTimeout(() => { canvas.style.backgroundColor = "#1a1a1a"; }, 100);
-                        } else if (t.trickType === 2) { // 紫色：ボール縮小（ステージ3限定）
+                        } else if (t.trickType === 2) {
                             const curSpd = Math.hypot(ball.dx, ball.dy);
                             speedMulti = ball.baseSpeed / (curSpd || 1);
-                            ball.radius = 4; // 一回り小さくする
+                            ball.radius = 4;
                             canvas.style.backgroundColor = "rgba(200, 0, 255, 0.2)";
-                            playSE(2000, 'sine', 0.2, 0.05, 4000); // シュイーン！(縮小音)
+                            playSE(2000, 'sine', 0.2, 0.05, 4000);
                             setTimeout(() => { canvas.style.backgroundColor = "#1a1a1a"; }, 100);
-                        } else { // 通常
+                        } else {
                             const curSpd = Math.hypot(ball.dx, ball.dy);
                             speedMulti = ball.baseSpeed / (curSpd || 1);
-                            ball.radius = 8; // 通常の大きさに戻る
+                            ball.radius = 8;
                             canvas.style.backgroundColor = "#2a2a2a";
-                            playSE(440, 'sine', 0.1, 0.1); // ポヨン(通常反射)
+                            playSE(440, 'sine', 0.1, 0.1);
                             setTimeout(() => { canvas.style.backgroundColor = "#1a1a1a"; }, 50);
                         }
-
                         ball.dx *= speedMulti;
                         ball.dy *= speedMulti;
                         ball.x += nx * (ball.radius - res.dist);
                         ball.y += ny * (ball.radius - res.dist);
-
-                        // 当たった直後は少し待機（即座に連続で消えるのを防ぐ）
-                        t.life = 0; // すぐに消すようマーク
+                        t.life = 0;
                     }
                 }
             }
         }
 
-        // --- メインループ ---
         function update() {
             if (isGameOver) return;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-
             drawBricks();
             drawTrampolines();
             drawBall();
-
             collisionDetection();
-            updateBGM(); // BGMループを進める
+            updateBGM();
 
             if (ball.x + ball.dx > canvas.width - ball.radius || ball.x + ball.dx < ball.radius) {
                 ball.dx = -ball.dx;
-                playSE(150, 'square', 0.05, 0.05); // 壁反射の低い音
+                playSE(150, 'square', 0.05, 0.05);
             }
             if (ball.y + ball.dy < ball.radius) {
                 ball.dy = -ball.dy;
-                playSE(150, 'square', 0.05, 0.05); // 天井反射
+                playSE(150, 'square', 0.05, 0.05);
             }
             else if (ball.y + ball.dy > canvas.height - ball.radius) {
-                lives--; // ライフを減らす
+                lives--;
                 updateLivesUI();
-                playSE(100, 'sawtooth', 0.5, 0.1, 50); // ミス時の落ちる音
+                playSE(100, 'sawtooth', 0.5, 0.1, 50);
 
                 if (lives > 0) {
-                    // ミスしてもライフが残っている場合はボールを中央に戻して再スタート
                     ball.x = canvas.width / 2;
                     ball.y = canvas.height / 2;
                     ball.dx = (Math.random() > 0.5 ? 1 : -1) * 3;
                     ball.dy = -4;
-                    // 線もすべて消す
                     trampolines.length = 0;
                     drawingLine = null;
                 } else {
-                    // ライフが0になったらゲームオーバー
                     isGameOver = true;
                     setTimeout(() => {
-                        alert("GAME OVER... \n スコア: " + score);
-                        document.location.reload();
-                    }, 500); // すぐアラートが出ないように少しだけ遅延を500msに調整
+                        if (canReplay) {
+                            const useReplay = confirm("GAME OVER...\nスコア: " + score + "\n\n復活するとスコアは0になります。\n1回だけライフを回復して復活しますか？");
+                            if (useReplay) {
+                                lives = initialLives; 
+                                score = 0; // ★スコアをリセット
+                                scoreText.innerText = score; // ★表示も更新
+                                canReplay = false;    
+                                isGameOver = false;   
+                                updateLivesUI();      
+                                
+                                ball.x = canvas.width / 2;
+                                ball.y = canvas.height / 2;
+                                ball.dx = (Math.random() > 0.5 ? 1 : -1) * 3;
+                                ball.dy = -4;
+                                trampolines.length = 0;
+                                
+                                lastBgmTime = Date.now();
+                                update(); 
+                            } else {
+                                document.location.reload();
+                            }
+                        } else {
+                            alert("GAME OVER... \n スコア: " + score);
+                            document.location.reload();
+                        }
+                    }, 500);
                 }
             }
 
@@ -712,17 +605,11 @@
                 trampolines[i].life -= 2;
                 if (trampolines[i].life <= 0) {
                     trampolines.splice(i, 1);
-                    // 完全に線が消えた時刻を記録
                     lastLineTime = Date.now();
                 }
             }
-
             requestAnimationFrame(update);
         }
-
-        // 初回の自動実行を削除し、スタートボタンが押されるまで何もしない
-        // loadStage(1);
-        // update();
     </script>
 </body>
 
