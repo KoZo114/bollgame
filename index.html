@@ -65,30 +65,13 @@
         }
 
         @keyframes pulse {
-            0% {
-                transform: scale(1);
-            }
-
-            50% {
-                transform: scale(1.05);
-            }
-
-            100% {
-                transform: scale(1);
-            }
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
         }
 
-        h2 {
-            margin: 0;
-            font-size: 24px;
-        }
-
-        #stageInfo {
-            font-size: 20px;
-            color: #00FFDD;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
+        h2 { margin: 0; font-size: 24px; }
+        #stageInfo { font-size: 20px; color: #00FFDD; margin-bottom: 5px; font-weight: bold; }
     </style>
 </head>
 
@@ -100,8 +83,7 @@
     </div>
 
     <div id="ui" style="display: none;">
-        <div id="stageInfo">STAGE 1 <span id="livesContainer"
-                style="color: #FF3366; margin-left:15px; font-size: 18px;">♥♥♥</span></div>
+        <div id="stageInfo">STAGE 1 <span id="livesContainer" style="color: #FF3366; margin-left:15px; font-size: 18px;">♥♥♥</span></div>
         <h2>Score: <span id="scoreText">0</span></h2>
     </div>
     <canvas id="gameCanvas" style="display: none;"></canvas>
@@ -116,7 +98,6 @@
         const startButton = document.getElementById("startButton");
 
         let gameStarted = false;
-
         function resize() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
@@ -131,7 +112,7 @@
         const initialLives = 3; 
         let lives = initialLives; 
         let canReplay = true; 
-        const livesContainer = document.getElementById("livesContainer");
+        let particles = []; // ★花火用のパーティクル配列
 
         function updateLivesUI() {
             let hearts = "";
@@ -149,20 +130,14 @@
                 if (!AudioContext) return;
                 audioCtx = new AudioContext();
             }
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
+            if (audioCtx.state === 'suspended') audioCtx.resume();
             startBGM();
         }
 
         function unlockAudio() {
             if (!isSoundEnabled) return;
-            if (!audioCtx) {
-                initAudio();
-            } else if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
-
+            if (!audioCtx) initAudio();
+            else if (audioCtx.state === 'suspended') audioCtx.resume();
             if (audioCtx && audioCtx.state === 'running') {
                 const osc = audioCtx.createOscillator();
                 const gain = audioCtx.createGain();
@@ -171,7 +146,6 @@
                 gain.connect(audioCtx.destination);
                 osc.start();
                 osc.stop(audioCtx.currentTime + 0.001);
-
                 document.removeEventListener('touchstart', unlockAudio, { capture: true });
                 document.removeEventListener('touchend', unlockAudio, { capture: true });
                 document.removeEventListener('mousedown', unlockAudio, { capture: true });
@@ -216,10 +190,7 @@
         let bgmStep = 0;
         let lastBgmTime = 0;
         const bgmTempo = 200;
-        const bgmNotes = [
-            130.81, 164.81, 196.00, 261.63,
-            123.47, 146.83, 196.00, 246.94
-        ];
+        const bgmNotes = [130.81, 164.81, 196.00, 261.63, 123.47, 146.83, 196.00, 246.94];
 
         function updateBGM() {
             if (!isSoundEnabled || isGameOver || !audioCtx) return;
@@ -230,49 +201,48 @@
                 lastBgmTime = now;
             }
         }
-        function startBGM() {
-            lastBgmTime = Date.now();
-        }
+        function startBGM() { lastBgmTime = Date.now(); }
 
         const ball = { x: 0, y: 0, radius: 8, dx: 0, dy: 0, baseSpeed: 7, color: "#FF3366" };
         let bricks = [];
-        let brickColumnCount = 0;
-        let brickRowCount = 0;
-        const brickPadding = 8;
-        const brickOffsetTop = 120;
-        const brickWidth = 52;
-        const brickHeight = 20;
+        let brickColumnCount = 0, brickRowCount = 0;
+        const brickPadding = 8, brickOffsetTop = 120, brickWidth = 52, brickHeight = 20;
         let maxLineLength = 100;
+
+        // ★花火（パーティクル）を生成する関数
+        function createFireworks(x, y) {
+            for (let i = 0; i < 40; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 8 + 2;
+                particles.push({
+                    x: x, y: y,
+                    dx: Math.cos(angle) * speed,
+                    dy: Math.sin(angle) * speed,
+                    size: Math.random() * 4 + 2,
+                    color: `hsl(${Math.random() * 360}, 100%, 60%)`,
+                    life: 1.0 // 透明度として使用
+                });
+            }
+        }
 
         function loadStage(stage) {
             currentStage = stage;
             updateLivesUI();
-            
             ball.x = canvas.width / 2;
             ball.y = canvas.height / 2;
             ball.dx = (Math.random() > 0.5 ? 1 : -1) * 3;
             ball.dy = -4;
             ball.radius = 8;
-
             brickColumnCount = Math.floor(canvas.width / (brickWidth + brickPadding));
             const brickOffsetLeft = (canvas.width - (brickColumnCount * (brickWidth + brickPadding)) + brickPadding) / 2;
-
             if (stage === 1) {
-                ball.baseSpeed = 6;
-                brickRowCount = 4;
-                maxLineLength = 200;
+                ball.baseSpeed = 6; brickRowCount = 4; maxLineLength = 200;
                 createBricksRandom(brickColumnCount, brickRowCount, brickOffsetLeft, 1.0);
-            }
-            else if (stage === 2) {
-                ball.baseSpeed = 8;
-                brickRowCount = 6;
-                maxLineLength = 150; 
+            } else if (stage === 2) {
+                ball.baseSpeed = 8; brickRowCount = 6; maxLineLength = 150; 
                 createBricksRandom(brickColumnCount, brickRowCount, brickOffsetLeft, 0.7);
-            }
-            else if (stage === 3) {
-                ball.baseSpeed = 10;
-                brickRowCount = 8;
-                maxLineLength = 110;
+            } else if (stage === 3) {
+                ball.baseSpeed = 10; brickRowCount = 8; maxLineLength = 110;
                 createBricksPyramid(brickColumnCount, brickRowCount, brickOffsetLeft);
             }
         }
@@ -290,32 +260,20 @@
 
         function createBricksPyramid(cols, rows, offsetL) {
             bricks = [];
-            const indestructiblePositions = [
-                { c: Math.floor(cols / 4), r: Math.floor(rows / 2) },
-                { c: Math.floor(cols * 3 / 4), r: Math.floor(rows / 2) }
-            ];
+            const indestructiblePositions = [{ c: Math.floor(cols / 4), r: Math.floor(rows / 2) }, { c: Math.floor(cols * 3 / 4), r: Math.floor(rows / 2) }];
             for (let c = 0; c < cols; c++) {
                 bricks[c] = [];
                 for (let r = 0; r < rows; r++) {
                     const distFromCenter = Math.abs(c - cols / 2);
                     let status = (rows - r > distFromCenter) ? 1 : 0;
-                    let isIndestructible = false;
-                    for (let pos of indestructiblePositions) {
-                        if (pos.c === c && pos.r === r) {
-                            status = 2;
-                            isIndestructible = true;
-                            break;
-                        }
-                    }
-                    bricks[c][r] = { x: 0, y: 0, status: status, baseColorY: r, offsetL: offsetL, isIndestructible: isIndestructible };
+                    for (let pos of indestructiblePositions) { if (pos.c === c && pos.r === r) status = 2; }
+                    bricks[c][r] = { x: 0, y: 0, status: status, baseColorY: r, offsetL: offsetL };
                 }
             }
         }
 
         const trampolines = [];
-        let drawingLine = null;
-        let lineDrawCount = 0;
-        let lastLineTime = 0;
+        let drawingLine = null, lineDrawCount = 0, lastLineTime = 0;
         const cooldownTime = 200;
 
         function getCoords(e) {
@@ -327,8 +285,7 @@
             if (isSoundEnabled && !audioCtx) initAudio();
             e.preventDefault();
             if (trampolines.length > 0 || drawingLine !== null) return;
-            const now = Date.now();
-            if (now - lastLineTime < cooldownTime) return;
+            if (Date.now() - lastLineTime < cooldownTime) return;
             const pos = getCoords(e);
             lineDrawCount++;
             let trickType = 0;
@@ -341,28 +298,21 @@
             e.preventDefault();
             if (drawingLine) {
                 const pos = getCoords(e);
-                const dx = pos.x - drawingLine.start.x;
-                const dy = pos.y - drawingLine.start.y;
+                const dx = pos.x - drawingLine.start.x, dy = pos.y - drawingLine.start.y;
                 const dist = Math.hypot(dx, dy);
                 if (dist > maxLineLength) {
                     const ratio = maxLineLength / dist;
                     drawingLine.current = { x: drawingLine.start.x + dx * ratio, y: drawingLine.start.y + dy * ratio };
-                } else {
-                    drawingLine.current = pos;
-                }
+                } else drawingLine.current = pos;
             }
         }
 
         function endDraw(e) {
             e.preventDefault();
             if (drawingLine) {
-                const dx = drawingLine.current.x - drawingLine.start.x;
-                const dy = drawingLine.current.y - drawingLine.start.y;
-                if (Math.hypot(dx, dy) > 10) {
-                    trampolines.push({ start: drawingLine.start, end: drawingLine.current, life: 100, trickType: drawingLine.trickType });
-                } else {
-                    lastLineTime = Date.now();
-                }
+                const dx = drawingLine.current.x - drawingLine.start.x, dy = drawingLine.current.y - drawingLine.start.y;
+                if (Math.hypot(dx, dy) > 10) trampolines.push({ start: drawingLine.start, end: drawingLine.current, life: 100, trickType: drawingLine.trickType });
+                else lastLineTime = Date.now();
                 drawingLine = null;
             }
         }
@@ -374,73 +324,9 @@
         canvas.addEventListener("touchmove", moveDraw, { passive: false });
         canvas.addEventListener("touchend", endDraw);
 
-        function drawBall() {
-            ctx.beginPath();
-            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-            ctx.fillStyle = ball.color;
-            ctx.fill();
-            ctx.beginPath();
-            ctx.arc(ball.x, ball.y, ball.radius * 2, 0, Math.PI * 2);
-            ctx.fillStyle = "rgba(255, 51, 102, 0.2)";
-            ctx.fill();
-        }
-
-        function drawBricks() {
-            for (let c = 0; c < brickColumnCount; c++) {
-                for (let r = 0; r < brickRowCount; r++) {
-                    const b = bricks[c][r];
-                    if (b.status === 1 || b.status === 2) {
-                        b.x = (c * (brickWidth + brickPadding)) + b.offsetL;
-                        b.y = (r * (brickHeight + brickPadding)) + brickOffsetTop;
-                        ctx.beginPath();
-                        ctx.roundRect(b.x, b.y, brickWidth, brickHeight, 4);
-                        if (b.status === 2) ctx.fillStyle = "#888888";
-                        else ctx.fillStyle = `hsl(${b.baseColorY * 40 + 160}, 80%, 65%)`;
-                        ctx.fill();
-                    }
-                }
-            }
-        }
-
-        function drawTrampolines() {
-            ctx.lineCap = "round";
-            if (drawingLine) {
-                ctx.beginPath();
-                ctx.moveTo(drawingLine.start.x, drawingLine.start.y);
-                ctx.lineTo(drawingLine.current.x, drawingLine.current.y);
-                if (drawingLine.trickType === 1) ctx.strokeStyle = "rgba(255, 215, 0, 0.8)";
-                else if (drawingLine.trickType === 2) ctx.strokeStyle = "rgba(200, 0, 255, 0.8)";
-                else ctx.strokeStyle = "rgba(0, 255, 221, 0.5)";
-                ctx.lineWidth = 6;
-                ctx.stroke();
-            }
-            for (let i = 0; i < trampolines.length; i++) {
-                const t = trampolines[i];
-                ctx.beginPath();
-                ctx.moveTo(t.start.x, t.start.y);
-                ctx.lineTo(t.end.x, t.end.y);
-                if (t.trickType === 1) ctx.strokeStyle = `rgba(255, 215, 0, ${t.life / 100})`;
-                else if (t.trickType === 2) ctx.strokeStyle = `rgba(200, 0, 255, ${t.life / 100})`;
-                else ctx.strokeStyle = `rgba(0, 255, 221, ${t.life / 100})`;
-                ctx.lineWidth = 6;
-                ctx.stroke();
-            }
-        }
-
-        function getDistanceToSegment(p, a, b) {
-            const l2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
-            if (l2 == 0) return Math.hypot(p.x - a.x, p.y - a.y);
-            let t = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2;
-            t = Math.max(0, Math.min(1, t));
-            const proj = { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) };
-            return { dist: Math.hypot(p.x - proj.x, p.y - proj.y), proj: proj };
-        }
-
         function isStageClear() {
             for (let c = 0; c < brickColumnCount; c++) {
-                for (let r = 0; r < brickRowCount; r++) {
-                    if (bricks[c][r].status === 1) return false;
-                }
+                for (let r = 0; r < brickRowCount; r++) { if (bricks[c][r].status === 1) return false; }
             }
             return true;
         }
@@ -450,31 +336,22 @@
                 for (let r = 0; r < brickRowCount; r++) {
                     const b = bricks[c][r];
                     if (b.status === 1 || b.status === 2) {
-                        if (ball.x + ball.radius > b.x && ball.x - ball.radius < b.x + brickWidth &&
-                            ball.y + ball.radius > b.y && ball.y - ball.radius < b.y + brickHeight) {
+                        if (ball.x + ball.radius > b.x && ball.x - ball.radius < b.x + brickWidth && ball.y + ball.radius > b.y && ball.y - ball.radius < b.y + brickHeight) {
                             ball.dy = -ball.dy;
-                            if (b.status === 2) {
-                                playSE(200, 'square', 0.05, 0.05);
-                            } else {
-                                b.status = 0;
-                                score += 10;
-                                scoreText.innerText = score;
+                            if (b.status === 2) playSE(200, 'square', 0.05, 0.05);
+                            else {
+                                b.status = 0; score += 10; scoreText.innerText = score;
                                 playSE(880, 'square', 0.1, 0.05);
                                 if (isStageClear()) {
+                                    // ★クリア時に画面中央から花火を打ち上げる！
+                                    createFireworks(canvas.width / 2, canvas.height / 2);
+                                    
                                     if (currentStage < maxStage) {
                                         playSE(523.25, 'triangle', 0.2, 0.1, 1046.5);
                                         for (let i = 0; i < bgmNotes.length; i++) bgmNotes[i] *= 1.059463;
                                         isGameOver = true;
-                                        ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
-                                        ctx.fillRect(0, 0, canvas.width, canvas.height);
-                                        ctx.fillStyle = "#00FFDD";
-                                        ctx.font = "bold 30px 'Helvetica Neue', Arial, sans-serif";
-                                        ctx.textAlign = "center";
-                                        ctx.fillText(`STAGE ${currentStage} CLEAR!`, canvas.width / 2, canvas.height / 2);
-                                        ctx.textAlign = "left";
                                         setTimeout(() => {
-                                            isGameOver = false;
-                                            lastBgmTime = Date.now();
+                                            isGameOver = false; lastBgmTime = Date.now();
                                             loadStage(currentStage + 1);
                                             update();
                                         }, 1500);
@@ -494,121 +371,126 @@
                 const t = trampolines[i];
                 const res = getDistanceToSegment(ball, t.start, t.end);
                 if (res.dist < ball.radius) {
-                    const dx = t.end.x - t.start.x;
-                    const dy = t.end.y - t.start.y;
-                    const len = Math.hypot(dx, dy);
+                    const dx = t.end.x - t.start.x, dy = t.end.y - t.start.y, len = Math.hypot(dx, dy);
                     if (len > 0) {
-                        let nx = -dy / len;
-                        let ny = dx / len;
-                        let dotBall = ball.dx * nx + ball.dy * ny;
+                        let nx = -dy / len, ny = dx / len, dotBall = ball.dx * nx + ball.dy * ny;
                         if (dotBall > 0) { nx = -nx; ny = -ny; dotBall = -dotBall; }
-                        ball.dx = ball.dx - 2 * dotBall * nx;
-                        ball.dy = ball.dy - 2 * dotBall * ny;
-                        let speedMulti = 1.0;
+                        ball.dx = ball.dx - 2 * dotBall * nx; ball.dy = ball.dy - 2 * dotBall * ny;
                         if (t.trickType === 1) {
                             const curSpd = Math.hypot(ball.dx, ball.dy);
-                            const trickBoost = 1.5 + Math.random() * 0.5;
-                            speedMulti = (ball.baseSpeed * trickBoost) / (curSpd || 1);
-                            canvas.style.backgroundColor = "rgba(255, 215, 0, 0.3)";
-                            playSE(1200, 'sawtooth', 0.3, 0.05, 2400);
-                            setTimeout(() => { canvas.style.backgroundColor = "#1a1a1a"; }, 100);
+                            ball.dx *= (ball.baseSpeed * 1.7) / (curSpd || 1); ball.dy *= (ball.baseSpeed * 1.7) / (curSpd || 1);
+                            canvas.style.backgroundColor = "rgba(255, 215, 0, 0.3)"; playSE(1200, 'sawtooth', 0.3, 0.05, 2400);
                         } else if (t.trickType === 2) {
-                            const curSpd = Math.hypot(ball.dx, ball.dy);
-                            speedMulti = ball.baseSpeed / (curSpd || 1);
-                            ball.radius = 4;
-                            canvas.style.backgroundColor = "rgba(200, 0, 255, 0.2)";
-                            playSE(2000, 'sine', 0.2, 0.05, 4000);
-                            setTimeout(() => { canvas.style.backgroundColor = "#1a1a1a"; }, 100);
+                            ball.radius = 4; canvas.style.backgroundColor = "rgba(200, 0, 255, 0.2)"; playSE(2000, 'sine', 0.2, 0.05, 4000);
                         } else {
-                            const curSpd = Math.hypot(ball.dx, ball.dy);
-                            speedMulti = ball.baseSpeed / (curSpd || 1);
-                            ball.radius = 8;
-                            canvas.style.backgroundColor = "#2a2a2a";
-                            playSE(440, 'sine', 0.1, 0.1);
-                            setTimeout(() => { canvas.style.backgroundColor = "#1a1a1a"; }, 50);
+                            ball.radius = 8; canvas.style.backgroundColor = "#2a2a2a"; playSE(440, 'sine', 0.1, 0.1);
                         }
-                        ball.dx *= speedMulti;
-                        ball.dy *= speedMulti;
-                        ball.x += nx * (ball.radius - res.dist);
-                        ball.y += ny * (ball.radius - res.dist);
+                        setTimeout(() => { canvas.style.backgroundColor = "#1a1a1a"; }, 50);
                         t.life = 0;
                     }
                 }
             }
         }
 
+        function getDistanceToSegment(p, a, b) {
+            const l2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+            if (l2 == 0) return Math.hypot(p.x - a.x, p.y - a.y);
+            let t = Math.max(0, Math.min(1, ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2));
+            return { dist: Math.hypot(p.x - (a.x + t * (b.x - a.x)), p.y - (a.y + t * (b.y - a.y))) };
+        }
+
+        // --- メインループ ---
         function update() {
-            if (isGameOver) return;
+            if (isGameOver) {
+                // クリア中でもパーティクルだけは動かす
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                drawParticles();
+                requestAnimationFrame(update);
+                return;
+            }
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            drawBricks();
-            drawTrampolines();
-            drawBall();
+
+            // パーティクルの描画と更新
+            drawParticles();
+
+            // 通常描画
+            for (let c = 0; c < brickColumnCount; c++) {
+                for (let r = 0; r < brickRowCount; r++) {
+                    const b = bricks[c][r];
+                    if (b.status > 0) {
+                        b.x = (c * (brickWidth + brickPadding)) + b.offsetL;
+                        b.y = (r * (brickHeight + brickPadding)) + brickOffsetTop;
+                        ctx.beginPath(); ctx.roundRect(b.x, b.y, brickWidth, brickHeight, 4);
+                        ctx.fillStyle = b.status === 2 ? "#888888" : `hsl(${b.baseColorY * 40 + 160}, 80%, 65%)`;
+                        ctx.fill();
+                    }
+                }
+            }
+
+            // 線
+            ctx.lineCap = "round"; ctx.lineWidth = 6;
+            if (drawingLine) {
+                ctx.beginPath(); ctx.moveTo(drawingLine.start.x, drawingLine.start.y); ctx.lineTo(drawingLine.current.x, drawingLine.current.y);
+                ctx.strokeStyle = drawingLine.trickType === 1 ? "rgba(255,215,0,0.8)" : drawingLine.trickType === 2 ? "rgba(200,0,255,0.8)" : "rgba(0,255,221,0.5)";
+                ctx.stroke();
+            }
+            for (let t of trampolines) {
+                ctx.beginPath(); ctx.moveTo(t.start.x, t.start.y); ctx.lineTo(t.end.x, t.end.y);
+                ctx.strokeStyle = t.trickType === 1 ? `rgba(255,215,0,${t.life/100})` : t.trickType === 2 ? `rgba(200,0,255,${t.life/100})` : `rgba(0,255,221,${t.life/100})`;
+                ctx.stroke();
+            }
+
+            // ボール
+            ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); ctx.fillStyle = ball.color; ctx.fill();
+
             collisionDetection();
             updateBGM();
 
-            if (ball.x + ball.dx > canvas.width - ball.radius || ball.x + ball.dx < ball.radius) {
-                ball.dx = -ball.dx;
-                playSE(150, 'square', 0.05, 0.05);
-            }
-            if (ball.y + ball.dy < ball.radius) {
-                ball.dy = -ball.dy;
-                playSE(150, 'square', 0.05, 0.05);
-            }
+            if (ball.x + ball.dx > canvas.width - ball.radius || ball.x + ball.dx < ball.radius) ball.dx = -ball.dx;
+            if (ball.y + ball.dy < ball.radius) ball.dy = -ball.dy;
             else if (ball.y + ball.dy > canvas.height - ball.radius) {
-                lives--;
-                updateLivesUI();
-                playSE(100, 'sawtooth', 0.5, 0.1, 50);
-
-                if (lives > 0) {
-                    ball.x = canvas.width / 2;
-                    ball.y = canvas.height / 2;
-                    ball.dx = (Math.random() > 0.5 ? 1 : -1) * 3;
-                    ball.dy = -4;
-                    trampolines.length = 0;
-                    drawingLine = null;
-                } else {
+                lives--; updateLivesUI();
+                if (lives > 0) { ball.x = canvas.width / 2; ball.y = canvas.height / 2; ball.dx = (Math.random() > 0.5 ? 1 : -1) * 3; ball.dy = -4; trampolines.length = 0; }
+                else {
                     isGameOver = true;
                     setTimeout(() => {
-                        if (canReplay) {
-                            const useReplay = confirm("GAME OVER...\nスコア: " + score + "\n\n復活するとスコアは0になります。\n1回だけライフを回復して復活しますか？");
-                            if (useReplay) {
-                                lives = initialLives; 
-                                score = 0; // ★スコアをリセット
-                                scoreText.innerText = score; // ★表示も更新
-                                canReplay = false;    
-                                isGameOver = false;   
-                                updateLivesUI();      
-                                
-                                ball.x = canvas.width / 2;
-                                ball.y = canvas.height / 2;
-                                ball.dx = (Math.random() > 0.5 ? 1 : -1) * 3;
-                                ball.dy = -4;
-                                trampolines.length = 0;
-                                
-                                lastBgmTime = Date.now();
-                                update(); 
-                            } else {
-                                document.location.reload();
-                            }
-                        } else {
-                            alert("GAME OVER... \n スコア: " + score);
-                            document.location.reload();
-                        }
+                        if (canReplay && confirm("復活しますか？(スコアは0になります)")) {
+                            lives = initialLives; score = 0; scoreText.innerText = score; canReplay = false; isGameOver = false; updateLivesUI();
+                            ball.x = canvas.width / 2; ball.y = canvas.height / 2; ball.dx = 3; ball.dy = -4; update();
+                        } else document.location.reload();
                     }, 500);
                 }
             }
 
-            ball.x += ball.dx;
-            ball.y += ball.dy;
-
+            ball.x += ball.dx; ball.y += ball.dy;
             for (let i = trampolines.length - 1; i >= 0; i--) {
                 trampolines[i].life -= 2;
-                if (trampolines[i].life <= 0) {
-                    trampolines.splice(i, 1);
-                    lastLineTime = Date.now();
-                }
+                if (trampolines[i].life <= 0) { trampolines.splice(i, 1); lastLineTime = Date.now(); }
             }
             requestAnimationFrame(update);
+        }
+
+        // ★パーティクルを描画・更新する関数
+        function drawParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.dx;
+                p.y += p.dy;
+                p.dy += 0.1; // 重力で少し落とす
+                p.life -= 0.015;
+
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                    continue;
+                }
+
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1.0;
         }
     </script>
 </body>
