@@ -16,7 +16,6 @@
 
         canvas {
             display: block;
-            transition: background-color 0.1s;
         }
 
         #ui {
@@ -83,8 +82,7 @@
     </div>
 
     <div id="ui" style="display: none;">
-        <div id="stageInfo">STAGE 1 <span id="livesContainer"
-                style="color: #FF3366; margin-left:15px; font-size: 18px;">♥♥♥</span></div>
+        <div id="stageInfo">STAGE 1 <span id="livesContainer" style="color: #FF3366; margin-left:15px; font-size: 18px;">♥♥♥</span></div>
         <h2>Score: <span id="scoreText">0</span></h2>
     </div>
     <canvas id="gameCanvas" style="display: none;"></canvas>
@@ -107,14 +105,14 @@
         resize();
 
         let isGameOver = false;
-        let isGameCleared = false; // ★全クリ状態の管理
+        let isTransitioning = false; // ★ステージ切り替え中かどうか
         let score = 0;
         let currentStage = 1;
         const maxStage = 3;
         const initialLives = 3; 
         let lives = initialLives; 
         let canReplay = true; 
-        let particles = []; // ★花火用の火花
+        let particles = []; 
 
         function updateLivesUI() {
             let hearts = "";
@@ -168,7 +166,7 @@
         let bgmStep = 0, lastBgmTime = 0;
         const bgmNotes = [130.81, 164.81, 196.00, 261.63, 123.47, 146.83, 196.00, 246.94];
         function updateBGM() {
-            if (isGameOver || isGameCleared || !audioCtx) return;
+            if (isGameOver || !audioCtx) return;
             const now = Date.now();
             if (now - lastBgmTime > 200) {
                 playSE(bgmNotes[bgmStep % bgmNotes.length], 'square', 0.15, 0.005);
@@ -178,15 +176,15 @@
         }
         function startBGM() { lastBgmTime = Date.now(); }
 
-        const ball = { x: 0, y: 0, radius: 8, dx: 0, dy: 0, baseSpeed: 7, color: "#FF3366" };
+        const ball = { x: 0, y: 0, radius: 8, dx: 0, dy: 0, baseSpeed: 6, color: "#FF3366" };
         let bricks = [];
         let brickColumnCount = 0, brickRowCount = 0;
         const brickPadding = 8, brickOffsetTop = 120, brickWidth = 52, brickHeight = 20;
         let maxLineLength = 100;
 
-        // ★花火（火花）を生成する関数
+        // ★花火（火花）を生成する
         function createFireworks() {
-            for (let j = 0; j < 5; j++) { // 5連発
+            for (let j = 0; j < 8; j++) {
                 setTimeout(() => {
                     const centerX = Math.random() * canvas.width;
                     const centerY = Math.random() * (canvas.height / 2);
@@ -201,7 +199,7 @@
                             life: 1.0
                         });
                     }
-                }, j * 400);
+                }, j * 300);
             }
         }
 
@@ -233,13 +231,13 @@
 
         function createBricksPyramid(cols, rows, offsetL) {
             bricks = [];
-            const indestructiblePositions = [{ c: Math.floor(cols / 4), r: Math.floor(rows / 2) }, { c: Math.floor(cols * 3 / 4), r: Math.floor(rows / 2) }];
+            const indestructibles = [{ c: Math.floor(cols / 4), r: Math.floor(rows / 2) }, { c: Math.floor(cols * 3 / 4), r: Math.floor(rows / 2) }];
             for (let c = 0; c < cols; c++) {
                 bricks[c] = [];
                 for (let r = 0; r < rows; r++) {
                     const distFromCenter = Math.abs(c - cols / 2);
                     let status = (rows - r > distFromCenter) ? 1 : 0;
-                    for (let pos of indestructiblePositions) { if (pos.c === c && pos.r === r) status = 2; }
+                    for (let pos of indestructibles) { if (pos.c === c && pos.r === r) status = 2; }
                     bricks[c][r] = { x: 0, y: 0, status: status, baseColorY: r, offsetL: offsetL };
                 }
             }
@@ -255,7 +253,7 @@
 
         function startDraw(e) {
             e.preventDefault();
-            if (trampolines.length > 0 || drawingLine !== null || Date.now() - lastLineTime < 200) return;
+            if (isGameOver || isTransitioning || trampolines.length > 0 || drawingLine !== null || Date.now() - lastLineTime < 200) return;
             const pos = getCoords(e);
             lineDrawCount++;
             let trickType = (lineDrawCount % 10 === 0) ? 1 : (currentStage === 3 && lineDrawCount % 5 === 0) ? 2 : 0;
@@ -292,6 +290,8 @@
         canvas.addEventListener("touchend", endDraw);
 
         function collisionDetection() {
+            if (isTransitioning) return; // 切り替え中は判定しない
+
             for (let c = 0; c < brickColumnCount; c++) {
                 for (let r = 0; r < brickRowCount; r++) {
                     const b = bricks[c][r];
@@ -302,15 +302,15 @@
                             else {
                                 b.status = 0; score += 10; scoreText.innerText = score; playSE(880, 'square', 0.1, 0.05);
                                 if (isStageClear()) {
+                                    isTransitioning = true;
                                     if (currentStage < maxStage) {
-                                        playSE(523.25, 'triangle', 0.2, 0.1, 1046.5); isGameOver = true;
-                                        setTimeout(() => { isGameOver = false; lastBgmTime = Date.now(); loadStage(currentStage + 1); update(); }, 1500);
+                                        playSE(523.25, 'triangle', 0.2, 0.1, 1046.5);
+                                        setTimeout(() => { isTransitioning = false; lastBgmTime = Date.now(); loadStage(currentStage + 1); }, 1500);
                                     } else {
-                                        // ★全クリアのときだけ花火を上げる！
-                                        isGameCleared = true; 
+                                        // ★最終ステージクリアのときだけ花火
                                         playSE(1046.5, 'triangle', 0.5, 0.1, 2093);
                                         createFireworks();
-                                        setTimeout(() => { alert("CONGRATULATIONS! 全ステージクリア！おめでとう！"); document.location.reload(); }, 3500);
+                                        setTimeout(() => { alert("CONGRATULATIONS! 全ステージクリア！おめでとう！"); document.location.reload(); }, 4000);
                                     }
                                 }
                             }
@@ -327,16 +327,17 @@
                         let nx = -dy / len, ny = dx / len, dotBall = ball.dx * nx + ball.dy * ny;
                         if (dotBall > 0) { nx = -nx; ny = -ny; dotBall = -dotBall; }
                         ball.dx = ball.dx - 2 * dotBall * nx; ball.dy = ball.dy - 2 * dotBall * ny;
-                        if (t.trickType === 1) { // 加速
-                            const boost = (ball.baseSpeed * 1.6) / (Math.hypot(ball.dx, ball.dy) || 1);
-                            ball.dx *= boost; ball.dy *= boost;
+                        
+                        let speedMulti = 1.0;
+                        if (t.trickType === 1) { // 金色：加速
+                            speedMulti = (ball.baseSpeed * 1.6) / (Math.hypot(ball.dx, ball.dy) || 1);
                             canvas.style.backgroundColor = "rgba(255,215,0,0.3)"; playSE(1200, 'sawtooth', 0.3, 0.05, 2400);
                         } else {
                             if (t.trickType === 2) { ball.radius = 4; canvas.style.backgroundColor = "rgba(200,0,255,0.2)"; playSE(2000, 'sine', 0.2, 0.05, 4000); }
                             else { ball.radius = 8; canvas.style.backgroundColor = "#2a2a2a"; playSE(440, 'sine', 0.1, 0.1); }
-                            const norm = ball.baseSpeed / (Math.hypot(ball.dx, ball.dy) || 1);
-                            ball.dx *= norm; ball.dy *= norm;
+                            speedMulti = ball.baseSpeed / (Math.hypot(ball.dx, ball.dy) || 1);
                         }
+                        ball.dx *= speedMulti; ball.dy *= speedMulti;
                         setTimeout(() => { canvas.style.backgroundColor = "#1a1a1a"; }, 50); t.life = 0;
                     }
                 }
@@ -358,10 +359,9 @@
         }
 
         function update() {
-            if (isGameOver && !isGameCleared) return;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
-            // 花火更新
+            // 花火更新（常に動かす）
             for (let i = particles.length - 1; i >= 0; i--) {
                 const p = particles[i]; p.x += p.dx; p.y += p.dy; p.dy += 0.1; p.life -= 0.015;
                 if (p.life <= 0) { particles.splice(i, 1); continue; }
@@ -370,9 +370,7 @@
             }
             ctx.globalAlpha = 1.0;
 
-            if (isGameCleared) { requestAnimationFrame(update); return; }
-
-            // 描画：ブロック、線、ボール
+            // ステージ情報の描画
             for (let c = 0; c < brickColumnCount; c++) {
                 for (let r = 0; r < brickRowCount; r++) {
                     const b = bricks[c][r];
@@ -383,6 +381,49 @@
                     }
                 }
             }
+
+            // 切り替え中のメッセージ
+            if (isTransitioning) {
+                ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = "#00FFDD";
+                ctx.font = "bold 30px sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillText(`STAGE ${currentStage} CLEAR!`, canvas.width / 2, canvas.height / 2);
+                ctx.textAlign = "left";
+            } else if (!isGameOver) {
+                // 通常のボール移動と判定
+                collisionDetection();
+                updateBGM();
+
+                if (ball.x + ball.dx > canvas.width - ball.radius || ball.x + ball.dx < ball.radius) ball.dx = -ball.dx;
+                if (ball.y + ball.dy < ball.radius) ball.dy = -ball.dy;
+                else if (ball.y + ball.dy > canvas.height - ball.radius) {
+                    lives--; updateLivesUI(); playSE(100, 'sawtooth', 0.5, 0.1, 50);
+                    if (lives > 0) {
+                        ball.x = canvas.width / 2; ball.y = canvas.height / 2; ball.dx = (Math.random() > 0.5 ? 1 : -1) * 3; ball.dy = -4;
+                        trampolines.length = 0; drawingLine = null;
+                    } else {
+                        isGameOver = true;
+                        setTimeout(() => {
+                            if (canReplay && confirm("復活しますか？(スコアは0になります)")) {
+                                lives = initialLives; score = 0; scoreText.innerText = score; canReplay = false; isGameOver = false; updateLivesUI();
+                                ball.x = canvas.width / 2; ball.y = canvas.height / 2; ball.dx = 3; ball.dy = -4; 
+                            } else document.location.reload();
+                        }, 500);
+                    }
+                }
+
+                // ★速度リミッター（規定の速度へ常に戻す）
+                let curSpd = Math.hypot(ball.dx, ball.dy);
+                let targetSpd = (curSpd > ball.baseSpeed * 1.2) ? ball.baseSpeed * 1.6 : ball.baseSpeed;
+                let normalization = targetSpd / (curSpd || 1);
+                ball.dx *= normalization; ball.dy *= normalization;
+
+                ball.x += ball.dx; ball.y += ball.dy;
+            }
+
+            // 線描画
             ctx.lineCap = "round"; ctx.lineWidth = 6;
             if (drawingLine) {
                 ctx.beginPath(); ctx.moveTo(drawingLine.start.x, drawingLine.start.y); ctx.lineTo(drawingLine.current.x, drawingLine.current.y);
@@ -391,42 +432,15 @@
             for (let t of trampolines) {
                 ctx.beginPath(); ctx.moveTo(t.start.x, t.start.y); ctx.lineTo(t.end.x, t.end.y);
                 ctx.strokeStyle = t.trickType === 1 ? `rgba(255,215,0,${t.life/100})` : t.trickType === 2 ? `rgba(200,0,255,${t.life/100})` : `rgba(0,255,221,${t.life/100})`; ctx.stroke();
+                if (!isTransitioning) t.life -= 2;
             }
-            ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); ctx.fillStyle = ball.color; ctx.fill();
+            for (let i = trampolines.length - 1; i >= 0; i--) { if (trampolines[i].life <= 0) { trampolines.splice(i, 1); lastLineTime = Date.now(); } }
 
-            collisionDetection();
-            updateBGM();
-
-            // 壁・天井反射 & 落下
-            if (ball.x + ball.dx > canvas.width - ball.radius || ball.x + ball.dx < ball.radius) ball.dx = -ball.dx;
-            if (ball.y + ball.dy < ball.radius) ball.dy = -ball.dy;
-            else if (ball.y + ball.dy > canvas.height - ball.radius) {
-                lives--; updateLivesUI(); playSE(100, 'sawtooth', 0.5, 0.1, 50);
-                if (lives > 0) {
-                    ball.x = canvas.width / 2; ball.y = canvas.height / 2; ball.dx = (Math.random() > 0.5 ? 1 : -1) * 3; ball.dy = -4;
-                    trampolines.length = 0; drawingLine = null;
-                } else {
-                    isGameOver = true;
-                    setTimeout(() => {
-                        if (canReplay && confirm("復活しますか？(スコアは0になります)")) {
-                            lives = initialLives; score = 0; scoreText.innerText = score; canReplay = false; isGameOver = false; updateLivesUI();
-                            ball.x = canvas.width / 2; ball.y = canvas.height / 2; ball.dx = 3; ball.dy = -4; update();
-                        } else document.location.reload();
-                    }, 500);
-                }
+            // ボール描画
+            if (!isGameOver) {
+                ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2); ctx.fillStyle = ball.color; ctx.fill();
             }
 
-            // ★重要：速度の自動補正（尋常じゃない速さになるのを防ぐ）
-            let curSpd = Math.hypot(ball.dx, ball.dy);
-            let targetSpd = (curSpd > ball.baseSpeed * 1.2) ? ball.baseSpeed * 1.6 : ball.baseSpeed;
-            let normalization = targetSpd / (curSpd || 1);
-            ball.dx *= normalization; ball.dy *= normalization;
-
-            ball.x += ball.dx; ball.y += ball.dy;
-            for (let i = trampolines.length - 1; i >= 0; i--) {
-                trampolines[i].life -= 2;
-                if (trampolines[i].life <= 0) { trampolines.splice(i, 1); lastLineTime = Date.now(); }
-            }
             requestAnimationFrame(update);
         }
     </script>
